@@ -12,7 +12,10 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+cors({
+    origin: "https://checklist-fe-saigoncoop.onrender.com", 
+    credentials: true,
+  })
 app.use(express.json());
 
 // Routes
