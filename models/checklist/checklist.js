@@ -10,6 +10,7 @@ const checklistSchema = new mongoose.Schema({
   ma_nhan_vien: String,
   ho_ten: String,
   don_vi: String,
+  so_xe:String,
   kiem_tra_ben_ngoai: [itemSchema],
   kiem_tra_khi_van_hanh: [itemSchema],
   ket_luan: String,

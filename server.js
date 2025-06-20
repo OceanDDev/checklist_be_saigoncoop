@@ -15,9 +15,12 @@ app.use(express.json());
 
 // Routes
 const userRoutes = require("./routes/users/user.routes");
-app.use("/api/users", userRoutes);
+app.use("/api/saigoncoop", userRoutes);
 const checklistRoutes = require("./routes/checklist/checklist.routes");
-app.use("/api/checklist", checklistRoutes);
+app.use("/api/saigoncoop", checklistRoutes);
+const authRoutes = require("./routes/auth/auth.routes");
+app.use("/api/saigoncoop", authRoutes);
+
 
 // Connect MongoDB
 mongoose

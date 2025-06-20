@@ -20,3 +20,15 @@ exports.getAllChecklist = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.getChecklistById = async (req, res) => {
+  try {
+    const checklist = await Checklist.findById(req.params.id);
+    if (!checklist) {
+      return res.status(404).json({ error: "Checklist không tồn tại" });
+    }
+    res.json(checklist);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
