@@ -1,20 +1,27 @@
 const mongoose = require("mongoose");
 
-const itemSchema = new mongoose.Schema({
-  noidung: String,
-  dap_an: String,  // Y hoặc N
-  ghi_chu: String
-});
-
-const checklistSchema = new mongoose.Schema({
+const CheckListSchema = new mongoose.Schema({
+  form_id: { type: mongoose.Schema.Types.ObjectId, ref: "CheckListForm", required: true },
   ma_nhan_vien: String,
   ho_ten: String,
   don_vi: String,
-  so_xe:String,
-  kiem_tra_ben_ngoai: [itemSchema],
-  kiem_tra_khi_van_hanh: [itemSchema],
+  so_xe: String,
   ket_luan: String,
-  ngay_tao: { type: Date, default: Date.now }
+  kiem_tra_ben_ngoai: [
+    {
+      noidung: String,
+      dap_an: String,
+      ghi_chu: String,
+    },
+  ],
+  kiem_tra_khi_van_hanh: [
+    {
+      noidung: String,
+      dap_an: String,
+      ghi_chu: String,
+    },
+  ],
+  ngay_tao: { type: Date, default: Date.now },
 });
 
-module.exports = mongoose.model("Checklist", checklistSchema);
+module.exports = mongoose.model("CheckList", CheckListSchema);

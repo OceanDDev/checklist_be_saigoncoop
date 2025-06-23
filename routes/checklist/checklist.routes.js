@@ -8,5 +8,8 @@ router.post("/checklist", checklistController.createChecklist);
 // GET: lấy danh sách checklist
 router.get("/checklist", checklistController.getAllChecklist);
 router.get("/checklist/:id", checklistController.getChecklistById);
+router.post("/checklist/:formId", checklistController.createChecklist);
+router.get("/checklist/form/:formId", checklistController.getCheckListsByFormId);
+
 
 module.exports = router;
