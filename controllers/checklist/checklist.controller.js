@@ -1,4 +1,5 @@
 const Checklist = require("../../models/checklist/checklist");
+const dayjs = require("dayjs");
 
 // Tạo checklist mới
 exports.createChecklist = async (req, res) => {
@@ -9,8 +10,12 @@ exports.createChecklist = async (req, res) => {
       return res.status(400).json({ error: "Thiếu formId trong URL." });
     }
 
-    // Gắn form_id vào body
     req.body.form_id = formId;
+
+    // Kiểm tra xem option_da_chon có đúng định dạng không
+    if (req.body.option_da_chon && !Array.isArray(req.body.option_da_chon)) {
+      return res.status(400).json({ error: "Trường option_da_chon phải là mảng." });
+    }
 
     const checklist = new Checklist(req.body);
     await checklist.save();
@@ -20,6 +25,7 @@ exports.createChecklist = async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 };
+
 
 
 // Lấy toàn bộ checklist
@@ -53,4 +59,20 @@ exports.getCheckListsByFormId = async (req, res) => {
     console.error("Lỗi khi lấy checklist theo form:", error);
     res.status(500).json({ error: "Server error" });
   }
+};
+
+exports.checkDuplicate = async (req, res) => {
+  const { formId } = req.params;
+  const { ma_nhan_vien } = req.query;
+
+  const start = dayjs().startOf("day").toDate();
+  const end = dayjs().endOf("day").toDate();
+
+  const exists = await Checklist.findOne({
+    form_id: formId,
+    ma_nhan_vien,
+    ngay_tao: { $gte: start, $lte: end },
+  });
+
+  res.json({ exists: !!exists });
 };

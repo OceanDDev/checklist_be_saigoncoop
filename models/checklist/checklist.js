@@ -5,20 +5,27 @@ const CheckListSchema = new mongoose.Schema({
   ma_nhan_vien: String,
   ho_ten: String,
   don_vi: String,
-  so_xe: String,
-  ket_luan: String,
+  ghi_chu: String,
+
+  // Danh sách người dùng chọn từ option của ChecklistForm
+  option_da_chon: [
+    {
+      label: String,        // ví dụ: "Chọn khu vực kiểm tra"
+      value: String         // ví dụ: "Khu A"
+    }
+  ],
+
   kiem_tra_ben_ngoai: [
     {
       noidung: String,
       dap_an: String,
-      ghi_chu: String,
     },
   ],
   kiem_tra_khi_van_hanh: [
     {
       noidung: String,
+
       dap_an: String,
-      ghi_chu: String,
     },
   ],
   ngay_tao: { type: Date, default: Date.now },

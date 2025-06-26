@@ -10,6 +10,7 @@ router.get("/checklist", checklistController.getAllChecklist);
 router.get("/checklist/:id", checklistController.getChecklistById);
 router.post("/checklist/:formId", checklistController.createChecklist);
 router.get("/checklist/form/:formId", checklistController.getCheckListsByFormId);
+router.get("/checklist/check-duplicate/:formId", checklistController.checkDuplicate);
 
 
 module.exports = router;
