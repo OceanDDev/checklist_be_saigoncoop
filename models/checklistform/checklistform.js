@@ -4,17 +4,21 @@ const itemSchema = new mongoose.Schema({
   noidung: { type: String, required: true },
 });
 
+const groupSchema = new mongoose.Schema({
+  label: { type: String, required: true },       // Tên nhóm kiểm tra, ví dụ: "Kiểm tra bên ngoài"
+  items: [itemSchema],                           // Danh sách các mục kiểm tra trong nhóm
+});
+
 const optionSchema = new mongoose.Schema({
-  label: { type: String, required: true },          // tiêu đề hiển thị
-  choices: [{ type: String, required: true }],      // danh sách option để chọn
+  label: { type: String, required: true },
+  choices: [{ type: String, required: true }],
 });
 
 const checklistformSchema = new mongoose.Schema({
   tieu_de: { type: String, required: true },
   mo_ta: { type: String },
-  kiem_tra_ben_ngoai: [itemSchema],
-  kiem_tra_khi_van_hanh: [itemSchema],
-  option: [optionSchema], // ← thêm trường này
+  checklist_groups: [groupSchema],               // ← dùng array thay vì 2 field cố định
+  option: [optionSchema],
   created_at: { type: Date, default: Date.now }
 });
 

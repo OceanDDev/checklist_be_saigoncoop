@@ -20,12 +20,15 @@ const userRoutes = require("./routes/users/user.routes");
 const checklistRoutes = require("./routes/checklist/checklist.routes");
 const authRoutes = require("./routes/auth/auth.routes");
 const checklistformRoutes = require("./routes/checklistform/checklistform.routes");
+const staffRoutes = require("./routes/staff/staff.routes");
 
 
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
 app.use("/api/saigoncoop", authRoutes);
 app.use("/api/saigoncoop", checklistformRoutes);
+app.use("/api/saigoncoop", staffRoutes);
+
 
 
 
