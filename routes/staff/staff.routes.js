@@ -9,5 +9,7 @@ router.post("/", staffController.createStaff);
 router.post("/manystaff", staffController.createManyStaffs);
 router.put("/:id", staffController.updateStaff);
 router.delete("/:id", staffController.deleteStaff);
+router.get("/staff/search", staffController.getStaffByMaNV);
+
 
 module.exports = router;

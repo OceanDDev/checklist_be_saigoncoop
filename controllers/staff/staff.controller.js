@@ -79,3 +79,21 @@ exports.deleteStaff = async (req, res) => {
     res.status(500).json({ error: "Xóa thất bại", details: err.message });
   }
 };
+
+// Tìm nhân viên theo mã nhân viên
+exports.getStaffByMaNV = async (req, res) => {
+  try {
+    const { ma_nhan_vien } = req.query;
+    if (!ma_nhan_vien) {
+      return res.status(400).json({ error: "Thiếu mã nhân viên" });
+    }
+
+    const staff = await Staff.findOne({ ma_nhan_vien });
+
+    if (!staff) return res.status(404).json({ error: "Không tìm thấy nhân viên" });
+
+    res.json(staff);
+  } catch (err) {
+    res.status(500).json({ error: "Lỗi khi tìm nhân viên", details: err.message });
+  }
+};
