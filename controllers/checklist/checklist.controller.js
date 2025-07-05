@@ -70,7 +70,7 @@ exports.checkDuplicate = async (req, res) => {
     return res.status(400).json({ error: "Thiếu tham số soHieuXe." });
   }
 
-  const start = dayjs().startOf("day").toDate();
+  const start = dayjs().startOf("day").toDate();    
   const end = dayjs().endOf("day").toDate();
 
   try {
