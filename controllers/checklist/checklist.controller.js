@@ -74,21 +74,30 @@ exports.checkDuplicate = async (req, res) => {
   const end = dayjs().endOf("day").toDate();
 
   try {
-    const exists = await Checklist.findOne({
+    const checklist = await Checklist.findOne({
       form_id: formId,
       option_da_chon: {
         $elemMatch: {
-          label: { $regex: /^\s*Số hiệu xe\s*$/i }, // dùng regex để bỏ khoảng trắng 2 đầu
-          value: { $regex: `^\\s*${soHieuXe}\\s*$`, $options: "i" } // regex match giá trị không phân biệt khoảng trắng đầu/cuối
+          label: { $regex: /^\s*Số hiệu xe\s*$/i },
+          value: { $regex: `^\\s*${soHieuXe}\\s*$`, $options: "i" }
         },
       },
       ngay_tao: { $gte: start, $lte: end },
     });
 
-    res.json({ exists: !!exists });
+    if (checklist) {
+      return res.json({
+        exists: true,
+        ma_nhan_vien: checklist.ma_nhan_vien,
+        ho_ten: checklist.ho_ten,
+      });
+    }
+
+    res.json({ exists: false });
   } catch (err) {
     console.error("Lỗi kiểm tra trùng số hiệu xe:", err);
     res.status(500).json({ error: "Lỗi kiểm tra số hiệu xe nâng." });
   }
 };
+
 
