@@ -61,18 +61,34 @@ exports.getCheckListsByFormId = async (req, res) => {
   }
 };
 
+// /controllers/checklist.controller.js
 exports.checkDuplicate = async (req, res) => {
   const { formId } = req.params;
-  const { ma_nhan_vien } = req.query;
+  const { soHieuXe } = req.query;
+
+  if (!soHieuXe) {
+    return res.status(400).json({ error: "Thiếu tham số soHieuXe." });
+  }
 
   const start = dayjs().startOf("day").toDate();
   const end = dayjs().endOf("day").toDate();
 
-  const exists = await Checklist.findOne({
-    form_id: formId,
-    ma_nhan_vien,
-    ngay_tao: { $gte: start, $lte: end },
-  });
+  try {
+    const exists = await Checklist.findOne({
+      form_id: formId,
+      option_da_chon: {
+        $elemMatch: {
+          label: { $regex: /^\s*Số hiệu xe\s*$/i }, // dùng regex để bỏ khoảng trắng 2 đầu
+          value: { $regex: `^\\s*${soHieuXe}\\s*$`, $options: "i" } // regex match giá trị không phân biệt khoảng trắng đầu/cuối
+        },
+      },
+      ngay_tao: { $gte: start, $lte: end },
+    });
 
-  res.json({ exists: !!exists });
+    res.json({ exists: !!exists });
+  } catch (err) {
+    console.error("Lỗi kiểm tra trùng số hiệu xe:", err);
+    res.status(500).json({ error: "Lỗi kiểm tra số hiệu xe nâng." });
+  }
 };
+
