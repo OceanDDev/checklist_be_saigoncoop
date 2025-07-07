@@ -16,6 +16,7 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN,
   credentials: true,
 }));app.use(express.json());
+console.log("✅ CORS_ORIGIN loaded:", process.env.CORS_ORIGIN);
 
 // Routes
 const userRoutes = require("./routes/users/user.routes");
