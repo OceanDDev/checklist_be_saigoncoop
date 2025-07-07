@@ -11,22 +11,12 @@ const app = express();
 // Cổng do Render cung cấp
 const PORT = process.env.PORT || 5000;
 
-const allowedOrigins = [
-  "http://localhost:5173",          // FE local (Vite mặc định)
-  "https://checklistsccoop.site"    // FE production
-];
-
+// Middleware
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-  credentials: true
-}));
-
+  origin: process.env.CORS_ORIGIN,
+  credentials: true,
+}));app.use(express.json());
+console.log("✅ CORS_ORIGIN loaded:", process.env.CORS_ORIGIN);
 
 // Routes
 const userRoutes = require("./routes/users/user.routes");
