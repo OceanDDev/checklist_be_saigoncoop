@@ -100,4 +100,20 @@ exports.checkDuplicate = async (req, res) => {
   }
 };
 
+// Xóa checklist theo ID
+exports.deleteChecklist = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedChecklist = await Checklist.findByIdAndDelete(id);
+
+    if (!deletedChecklist) {
+      return res.status(404).json({ error: "Checklist không tồn tại." });
+    }
+
+    res.json({ message: "Checklist đã được xóa.", checklist: deletedChecklist });
+  } catch (err) {
+    console.error("Lỗi khi xóa checklist:", err);
+    res.status(500).json({ error: "Lỗi server khi xóa checklist." });
+  }
+};
 
