@@ -1,5 +1,10 @@
 const Checklist = require("../../models/checklist/checklist");
 const dayjs = require("dayjs");
+const utc = require('dayjs/plugin/utc');
+const timezone = require('dayjs/plugin/timezone');
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 // Tạo checklist mới
 exports.createChecklist = async (req, res) => {
@@ -70,8 +75,14 @@ exports.checkDuplicate = async (req, res) => {
     return res.status(400).json({ error: "Thiếu tham số soHieuXe." });
   }
 
-  const start = dayjs().startOf("day").toDate();    
-  const end = dayjs().endOf("day").toDate();
+  // Sử dụng múi giờ VN để reset đúng 00:00 VN
+  const start = dayjs().tz('Asia/Ho_Chi_Minh').startOf("day").toDate();    
+  const end = dayjs().tz('Asia/Ho_Chi_Minh').endOf("day").toDate();
+
+  // Debug log (có thể xóa sau khi test xong)
+  console.log('VN Start:', start);
+  console.log('VN End:', end);
+  console.log('Current VN:', dayjs().tz('Asia/Ho_Chi_Minh').toDate());
 
   try {
     const checklist = await Checklist.findOne({
@@ -86,6 +97,9 @@ exports.checkDuplicate = async (req, res) => {
     });
 
     if (checklist) {
+      // Debug log
+      console.log('Found checklist ngay_tao:', checklist.ngay_tao);
+      
       return res.json({
         exists: true,
         ma_nhan_vien: checklist.ma_nhan_vien,
@@ -99,5 +113,3 @@ exports.checkDuplicate = async (req, res) => {
     res.status(500).json({ error: "Lỗi kiểm tra số hiệu xe nâng." });
   }
 };
-
-
