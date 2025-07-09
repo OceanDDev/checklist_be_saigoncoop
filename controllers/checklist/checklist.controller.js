@@ -54,6 +54,20 @@ exports.getChecklistById = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// Xóa checklist theo ID
+exports.deleteChecklist = async (req, res) => {
+  try {
+    const checklist = await Checklist.findByIdAndDelete(req.params.id);
+
+    if (!checklist) {
+      return res.status(404).json({ error: "Checklist không tồn tại." });
+    }
+
+    res.json({ message: "Checklist đã được xóa thành công." });
+  } catch (err) {
+    res.status(500).json({ error: "Lỗi khi xóa checklist." });
+  }
+};
 
 exports.getCheckListsByFormId = async (req, res) => {
   try {
