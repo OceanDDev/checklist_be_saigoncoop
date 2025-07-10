@@ -13,10 +13,10 @@ const groupSchema = new mongoose.Schema({
 
 // Schema cho tuỳ chọn lựa chọn (option), không bắt buộc
 const optionSchema = new mongoose.Schema({
-  label: { type: String }, // Không required
+  label: { type: String },
   choices: {
     type: [String],
-    default: [],            // Mặc định là mảng rỗng
+    default: [],
   },
 });
 
@@ -24,13 +24,18 @@ const optionSchema = new mongoose.Schema({
 const checklistformSchema = new mongoose.Schema({
   tieu_de: { type: String, required: true },
   mo_ta: { type: String },
+  loai: {
+    type: String,
+    required: true,
+    enum: ["Ban Điều Hành", "Nhà Kho"], // 🔒 chỉ chấp nhận 2 giá trị
+  },
   checklist_groups: {
     type: [groupSchema],
-    default: [],            // Mặc định rỗng
+    default: [],
   },
   option: {
     type: [optionSchema],
-    default: [],            // Mặc định rỗng
+    default: [],
   },
   created_at: { type: Date, default: Date.now },
 });
