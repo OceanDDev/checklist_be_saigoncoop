@@ -31,12 +31,18 @@ const checklistRoutes = require("./routes/checklist/checklist.routes");
 const authRoutes = require("./routes/auth/auth.routes");
 const checklistformRoutes = require("./routes/checklistform/checklistform.routes");
 const staffRoutes = require("./routes/staff/staff.routes");
+const cuaHangRoutes =  require("./routes/dieuvan/cuahang/cuahang.routes");
+const rotKienRoutes =  require("./routes/dieuvan/rotkien/rotkien.routes");
+
 
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
 app.use("/api/saigoncoop", authRoutes);
 app.use("/api/saigoncoop", checklistformRoutes);
 app.use("/api/saigoncoop", staffRoutes);
+app.use("/api/saigoncoop", cuaHangRoutes);
+app.use("/api/saigoncoop", rotKienRoutes);
+
 
 // ✅ Kết nối MongoDB
 mongoose

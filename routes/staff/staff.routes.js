@@ -8,7 +8,7 @@ router.get("/staff/search", staffController.getStaffByMaNV);
 router.get("/staff/:id", staffController.getStaffById);
 router.post("/", staffController.createStaff);
 router.post("/manystaff", staffController.createManyStaffs);
-router.put("/:id", staffController.updateStaff);
+router.put("/:id", staffController.updateStaff);    
 router.delete("/:id", staffController.deleteStaff);
 
 
