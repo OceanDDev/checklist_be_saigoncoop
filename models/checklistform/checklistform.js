@@ -24,11 +24,7 @@ const optionSchema = new mongoose.Schema({
 const checklistformSchema = new mongoose.Schema({
   tieu_de: { type: String, required: true },
   mo_ta: { type: String },
-  loai: {
-    type: String,
-    required: true,
-    enum: ["Ban Điều Hành", "Nhà Kho"], // 🔒 chỉ chấp nhận 2 giá trị
-  },
+  
   checklist_groups: {
     type: [groupSchema],
     default: [],
