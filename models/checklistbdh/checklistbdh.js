@@ -3,6 +3,8 @@ const mongoose = require("mongoose");
 const congViecSchema = new mongoose.Schema({
   noidung: { type: String, required: true },
   da_chon: { type: Boolean, default: false }, // Được tích chọn hay chưa
+  so_lan: { type: Number, default: 0 },
+
 });
 
 const mucChecklistSchema = new mongoose.Schema({
@@ -16,6 +18,7 @@ const ChecklistBDHSchema = new mongoose.Schema({
   ho_ten: String,
   don_vi: String,
   ghi_chu: String,
+  so_lan: { type: Number, default: 0 },
 
   cac_muc: [mucChecklistSchema], // Danh sách các mục chứa các công việc
 
