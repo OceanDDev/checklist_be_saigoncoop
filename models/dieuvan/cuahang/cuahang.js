@@ -14,15 +14,18 @@ const cuahangSchema = new mongoose.Schema({
   },
   tenCHTruong: {
     type: String,
-    required: true,
-    trim: true
+    trim: true // Không bắt buộc
   },
   email: {
     type: String,
-    required: true,
     trim: true,
     lowercase: true,
-    match: [/^\S+@\S+\.\S+$/, 'Email không hợp lệ']
+    match: [/^\S+@\S+\.\S+$/, 'Email không hợp lệ'] // Không bắt buộc
+  },
+  sdt: {
+    type: String,
+    trim: true,
+    match: [/^\d{9,11}$/, 'Số điện thoại không hợp lệ'] // 9–11 số
   }
 }, {
   timestamps: true // tự động tạo createdAt, updatedAt
