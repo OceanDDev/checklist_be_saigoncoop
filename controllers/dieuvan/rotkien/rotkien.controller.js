@@ -1,25 +1,55 @@
 const RotKien = require("../../../models/dieuvan/rotkien/rotkien");
 
+const mappingBoPhan = {
+  "Dieu Van": "Điều Vận",
+  "XU LY DON HANG": "XLĐH"
+};
+
 // Tạo mới một bản ghi rớt kiện
 exports.createRotKien = async (req, res) => {
   try {
-    const newRK = new RotKien(req.body);
-    await newRK.save();
-    res.status(201).json({ message: "Thêm rớt kiện thành công", data: newRK });
-  } catch (error) {
-    res.status(500).json({ message: "Lỗi server", error: error.message });
+    const name = req.headers["x-user-name"] || "Unknown";
+
+    const { maCH, tenCH, soKienRot, soSoda, ngayRotKien, ghiChu, trangThai } = req.body;
+    const boPhan = mappingBoPhan[name] || "Không xác định";
+
+    const newData = new RotKien({
+      name,
+      boPhan,
+      maCH,
+      tenCH,
+      soKienRot,
+      soSoda,
+      ngayRotKien,
+      ghiChu,
+      trangThai
+    });
+
+    const saved = await newData.save();
+    res.status(201).json(saved);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
 
 // Thêm nhiều bản ghi một lúc
 exports.createManyRotKien = async (req, res) => {
   try {
-    const data = req.body; // Array
+    const name = req.headers["x-user-name"] || "Unknown";
+    const data = req.body; // phải là mảng
+
     if (!Array.isArray(data) || data.length === 0) {
       return res.status(400).json({ message: "Dữ liệu không hợp lệ" });
     }
 
-    const inserted = await RotKien.insertMany(data);
+    const boPhan = mappingBoPhan[name] || "Không xác định";
+    const dataWithBoPhan = data.map((item) => ({
+      ...item,
+      name,
+      boPhan
+    }));
+
+    const inserted = await RotKien.insertMany(dataWithBoPhan);
     res.status(201).json({ message: "Thêm nhiều rớt kiện thành công", data: inserted });
   } catch (error) {
     res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -55,7 +85,7 @@ exports.updateRotKien = async (req, res) => {
     res.status(200).json({ message: "Cập nhật thành công", data: updated });
   } catch (error) {
     res.status(500).json({ message: "Lỗi server", error: error.message });
-  }   
+  }
 };
 
 // Xoá

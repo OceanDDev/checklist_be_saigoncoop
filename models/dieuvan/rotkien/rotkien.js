@@ -6,9 +6,11 @@ const rotKienSchema = new mongoose.Schema(
     tenCH: { type: String, required: true },
       soKienRot: { type: Number, min: 0 }, 
     soSoda: { type: Number, min: 0 },
-    ngayRotKien: { type: Date, required: true },
+    ngayRotKien:  { type: Date, default: Date.now ,required: true},
     ghiChu: { type: String },
-    trangThai: { type: Boolean, default: false } // true: hoàn tất, false: chưa
+    trangThai: { type: Boolean, default: false }, // true: hoàn tất, false: chưa,
+    boPhan: { type: String } // Thêm trường bộ phận
+
   },
   {
     timestamps: true // tự động thêm createdAt và updatedAt
