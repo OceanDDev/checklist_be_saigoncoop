@@ -36,7 +36,8 @@ const rotKienRoutes =  require("./routes/dieuvan/rotkien/rotkien.routes");
 const checklistBDHFormRoutes = require("./routes/checklistformbdh/checklistformbdh.routes");
 const checklistBDHRoutes = require("./routes/checklistbdh/checklistbdh.routes");
 const kpiStaff = require("./routes/kpistaff/kpi.routes");
-
+const checkKpiStaff = require("./routes/checkkpistaff/checkkpistaff.routes");
+const formKpiStaff = require("./routes/formkpistaff/formkpistaff.routes");
 
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
@@ -48,6 +49,10 @@ app.use("/api/saigoncoop", rotKienRoutes);
 app.use("/api/saigoncoop", checklistBDHFormRoutes);
 app.use("/api/saigoncoop", checklistBDHRoutes);
 app.use("/api/saigoncoop", kpiStaff);
+app.use("/api/saigoncoop", checkKpiStaff);
+app.use("/api/saigoncoop", formKpiStaff);
+
+
 
 
 

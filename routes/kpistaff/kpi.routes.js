@@ -7,7 +7,7 @@ router.get("/kpistaff", kpiStaffController.getAllKPI);
 
 // Lấy KPI của 1 nhân viên theo tháng
 // Ví dụ: /api/kpi-staff/staff/64abc12345?thang=8
-router.get("/kpistaff/:staffId", kpiStaffController.getKPIByStaffAndMonth);
+router.get("/kpistaff/:ma_nhan_vien", kpiStaffController.getKPIByStaffAndMonth);
 
 // Tạo KPI mới cho 1 nhân viên
 router.post("/kpistaff", kpiStaffController.createKPI);
@@ -20,4 +20,4 @@ router.delete("/kpistaff/:id", kpiStaffController.deleteKPI);
 
 router.post("/kpistaff/multiple", kpiStaffController.createMultipleKPI);
 
-module.exports = router;
+module.exports = router;    
