@@ -1,4 +1,4 @@
-const Cuahang = require('../../../models/dieuvan/cuahang/cuahang');
+const Cuahang = require("../../../models/dieuvan/cuahang/cuahang");
 
 // Tạo cửa hàng mới
 exports.createCuahang = async (req, res) => {
@@ -57,7 +57,9 @@ exports.updateCuahang = async (req, res) => {
     );
 
     if (!updated) {
-      return res.status(404).json({ message: "Không tìm thấy cửa hàng để cập nhật" });
+      return res
+        .status(404)
+        .json({ message: "Không tìm thấy cửa hàng để cập nhật" });
     }
 
     res.status(200).json({ message: "Cập nhật thành công", data: updated });
@@ -72,7 +74,9 @@ exports.deleteCuahang = async (req, res) => {
     const { id } = req.params;
     const deleted = await Cuahang.findByIdAndDelete(id);
     if (!deleted) {
-      return res.status(404).json({ message: "Không tìm thấy cửa hàng để xóa" });
+      return res
+        .status(404)
+        .json({ message: "Không tìm thấy cửa hàng để xóa" });
     }
 
     res.status(200).json({ message: "Xóa thành công" });
@@ -90,18 +94,20 @@ exports.createManyCuahang = async (req, res) => {
     }
 
     // Kiểm tra trùng maCH
-    const maCHs = cuahangs.map(ch => ch.maCH);
+    const maCHs = cuahangs.map((ch) => ch.maCH);
     const duplicates = await Cuahang.find({ maCH: { $in: maCHs } });
 
     if (duplicates.length > 0) {
       return res.status(400).json({
         message: "Một số mã cửa hàng đã tồn tại",
-        duplicates: duplicates.map(d => d.maCH),
+        duplicates: duplicates.map((d) => d.maCH),
       });
     }
 
     const inserted = await Cuahang.insertMany(cuahangs);
-    res.status(201).json({ message: "Thêm nhiều cửa hàng thành công", data: inserted });
+    res
+      .status(201)
+      .json({ message: "Thêm nhiều cửa hàng thành công", data: inserted });
   } catch (error) {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }

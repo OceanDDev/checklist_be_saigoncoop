@@ -31,15 +31,105 @@ exports.createChecklist = async (req, res) => {
   }
 };
 
-
-
-// Lấy toàn bộ checklist
+// Lấy toàn bộ checklist với phân trang
 exports.getAllChecklist = async (req, res) => {
   try {
-    const data = await Checklist.find().sort({ ngay_tao: -1 });
-    res.json(data);
+    // Lấy tham số phân trang từ query string
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Lấy tham số tìm kiếm nếu có
+    const search = req.query.search || '';
+    
+    // Tạo query filter
+    let filter = {};
+    if (search) {
+      filter = {
+        $or: [
+          { ma_nhan_vien: { $regex: search, $options: 'i' } },
+          { ho_ten: { $regex: search, $options: 'i' } },
+          { 'option_da_chon.value': { $regex: search, $options: 'i' } }
+        ]
+      };
+    }
+
+    // Thực hiện query với phân trang
+    const data = await Checklist.find(filter)
+      .sort({ ngay_tao: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // Đếm tổng số record để tính pagination info
+    const total = await Checklist.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      data,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalItems: total,
+        itemsPerPage: limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+};
+
+// Lấy checklist theo form ID với phân trang
+exports.getCheckListsByFormId = async (req, res) => {
+  try {
+    const { formId } = req.params;
+    
+    // Lấy tham số phân trang từ query string
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Lấy tham số tìm kiếm nếu có
+    const search = req.query.search || '';
+    
+    // Tạo query filter
+    let filter = { form_id: formId };
+    if (search) {
+      filter = {
+        form_id: formId,
+        $or: [
+          { ma_nhan_vien: { $regex: search, $options: 'i' } },
+          { ho_ten: { $regex: search, $options: 'i' } },
+          { 'option_da_chon.value': { $regex: search, $options: 'i' } }
+        ]
+      };
+    }
+
+    // Thực hiện query với phân trang
+    const checklists = await Checklist.find(filter)
+      .sort({ ngay_tao: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // Đếm tổng số record
+    const total = await Checklist.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      data: checklists,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalItems: total,
+        itemsPerPage: limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
+    });
+  } catch (error) {
+    console.error("Lỗi khi lấy checklist theo form:", error);
+    res.status(500).json({ error: "Server error" });
   }
 };
 
@@ -69,18 +159,7 @@ exports.deleteChecklist = async (req, res) => {
   }
 };
 
-exports.getCheckListsByFormId = async (req, res) => {
-  try {
-    const { formId } = req.params;
-    const checklists = await Checklist.find({ form_id: formId });
-    res.json(checklists);
-  } catch (error) {
-    console.error("Lỗi khi lấy checklist theo form:", error);
-    res.status(500).json({ error: "Server error" });
-  }
-};
-
-// /controllers/checklist.controller.js
+// Kiểm tra trùng lặp
 exports.checkDuplicate = async (req, res) => {
   const { formId } = req.params;
   const { soHieuXe } = req.query;
