@@ -31,15 +31,191 @@ exports.createChecklist = async (req, res) => {
   }
 };
 
-
-
-// Lấy toàn bộ checklist
+// Lấy toàn bộ checklist với phân trang và filter
 exports.getAllChecklist = async (req, res) => {
   try {
-    const data = await Checklist.find().sort({ ngay_tao: -1 });
-    res.json(data);
+    // Lấy tham số phân trang từ query string
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Lấy các tham số filter
+    const search = req.query.search || '';
+    const searchMaNV = req.query.searchMaNV || '';
+    const selectedOption = req.query.selectedOption || '';
+    const startDate = req.query.startDate;
+    const endDate = req.query.endDate;
+    
+    // Tạo query filter
+    let filter = {};
+    let andConditions = [];
+
+    // Filter theo search chung
+    if (search) {
+      andConditions.push({
+        $or: [
+          { ma_nhan_vien: { $regex: search, $options: 'i' } },
+          { ho_ten: { $regex: search, $options: 'i' } },
+          { 'option_da_chon.value': { $regex: search, $options: 'i' } }
+        ]
+      });
+    }
+
+    // Filter theo mã nhân viên
+    if (searchMaNV) {
+      andConditions.push({
+        ma_nhan_vien: { $regex: searchMaNV, $options: 'i' }
+      });
+    }
+
+    // Filter theo option đã chọn (format: "label: value")
+    if (selectedOption) {
+      const [label, value] = selectedOption.split(':').map(s => s.trim());
+      if (label && value) {
+        andConditions.push({
+          option_da_chon: {
+            $elemMatch: {
+              label: { $regex: `^\\s*${label}\\s*$`, $options: 'i' },
+              value: { $regex: `^\\s*${value}\\s*$`, $options: 'i' }
+            }
+          }
+        });
+      }
+    }
+
+    // Filter theo khoảng ngày
+    if (startDate && endDate) {
+      const start = dayjs(startDate).startOf('day').toDate();
+      const end = dayjs(endDate).endOf('day').toDate();
+      andConditions.push({
+        ngay_tao: { $gte: start, $lte: end }
+      });
+    }
+
+    // Kết hợp tất cả điều kiện
+    if (andConditions.length > 0) {
+      filter.$and = andConditions;
+    }
+
+    // Thực hiện query với phân trang
+    const data = await Checklist.find(filter)
+      .sort({ ngay_tao: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // Đếm tổng số record để tính pagination info
+    const total = await Checklist.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      data,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalItems: total,
+        itemsPerPage: limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
+    });
   } catch (err) {
+    console.error("Lỗi getAllChecklist:", err);
     res.status(500).json({ error: err.message });
+  }
+};
+
+// Lấy checklist theo form ID với phân trang và filter
+exports.getCheckListsByFormId = async (req, res) => {
+  try {
+    const { formId } = req.params;
+    
+    // Lấy tham số phân trang từ query string
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Lấy các tham số filter
+    const search = req.query.search || '';
+    const searchMaNV = req.query.searchMaNV || '';
+    const selectedOption = req.query.selectedOption || '';
+    const startDate = req.query.startDate;
+    const endDate = req.query.endDate;
+    
+    // Tạo query filter - bắt đầu với form_id
+    let filter = { form_id: formId };
+    let andConditions = [{ form_id: formId }];
+
+    // Filter theo search chung
+    if (search) {
+      andConditions.push({
+        $or: [
+          { ma_nhan_vien: { $regex: search, $options: 'i' } },
+          { ho_ten: { $regex: search, $options: 'i' } },
+          { 'option_da_chon.value': { $regex: search, $options: 'i' } }
+        ]
+      });
+    }
+
+    // Filter theo mã nhân viên
+    if (searchMaNV) {
+      andConditions.push({
+        ma_nhan_vien: { $regex: searchMaNV, $options: 'i' }
+      });
+    }
+
+    // Filter theo option đã chọn (format: "label: value")
+    if (selectedOption) {
+      const [label, value] = selectedOption.split(':').map(s => s.trim());
+      if (label && value) {
+        andConditions.push({
+          option_da_chon: {
+            $elemMatch: {
+              label: { $regex: `^\\s*${label}\\s*$`, $options: 'i' },
+              value: { $regex: `^\\s*${value}\\s*$`, $options: 'i' }
+            }
+          }
+        });
+      }
+    }
+
+    // Filter theo khoảng ngày
+    if (startDate && endDate) {
+      const start = dayjs(startDate).startOf('day').toDate();
+      const end = dayjs(endDate).endOf('day').toDate();
+      andConditions.push({
+        ngay_tao: { $gte: start, $lte: end }
+      });
+    }
+
+    // Kết hợp tất cả điều kiện
+    if (andConditions.length > 1) {
+      filter = { $and: andConditions };
+    }
+
+    // Thực hiện query với phân trang
+    const checklists = await Checklist.find(filter)
+      .sort({ ngay_tao: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // Đếm tổng số record
+    const total = await Checklist.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      data: checklists,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalItems: total,
+        itemsPerPage: limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
+    });
+  } catch (error) {
+    console.error("Lỗi khi lấy checklist theo form:", error);
+    res.status(500).json({ error: "Server error" });
   }
 };
 
@@ -54,6 +230,7 @@ exports.getChecklistById = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
 // Xóa checklist theo ID
 exports.deleteChecklist = async (req, res) => {
   try {
@@ -69,18 +246,7 @@ exports.deleteChecklist = async (req, res) => {
   }
 };
 
-exports.getCheckListsByFormId = async (req, res) => {
-  try {
-    const { formId } = req.params;
-    const checklists = await Checklist.find({ form_id: formId });
-    res.json(checklists);
-  } catch (error) {
-    console.error("Lỗi khi lấy checklist theo form:", error);
-    res.status(500).json({ error: "Server error" });
-  }
-};
-
-// /controllers/checklist.controller.js
+// Kiểm tra trùng lặp
 exports.checkDuplicate = async (req, res) => {
   const { formId } = req.params;
   const { soHieuXe } = req.query;
@@ -127,5 +293,66 @@ exports.checkDuplicate = async (req, res) => {
     res.status(500).json({ error: "Lỗi kiểm tra số hiệu xe nâng." });
   }
 };
+exports.getAvailableOptions = async (req, res) => {
+  try {
+    const { formId } = req.params;
+    const { startDate, endDate } = req.query;
 
+    if (!formId) return res.status(400).json({ error: "Thiếu formId." });
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: "Thiếu startDate hoặc endDate (YYYY-MM-DD)." });
+    }
 
+    // Cắt ngày theo múi giờ VN để không lệch ngày
+    const start = dayjs.tz(startDate, "Asia/Ho_Chi_Minh").startOf("day").toDate();
+    const end   = dayjs.tz(endDate,   "Asia/Ho_Chi_Minh").endOf("day").toDate();
+
+    const results = await Checklist.aggregate([
+      {
+        // Match cho cả trường hợp form_id là ObjectId hoặc string
+        $match: {
+          $expr: { $eq: [{ $toString: "$form_id" }, String(formId)] },
+          ngay_tao: { $gte: start, $lte: end },
+          option_da_chon: { $type: "array", $ne: [] },
+        },
+      },
+      { $unwind: "$option_da_chon" },
+      {
+        $project: {
+          originalLabel: { $ifNull: ["$option_da_chon.label", ""] },
+          originalValue: { $ifNull: ["$option_da_chon.value", ""] },
+          normLabel: {
+            $toLower: { $trim: { input: { $ifNull: ["$option_da_chon.label", ""] } } },
+          },
+          normValue: {
+            $toLower: { $trim: { input: { $ifNull: ["$option_da_chon.value", ""] } } },
+          },
+        },
+      },
+      { $match: { normLabel: { $ne: "" }, normValue: { $ne: "" } } },
+      {
+        // Group theo giá trị chuẩn hoá để gộp đúng, nhưng giữ lại phiên bản hiển thị gốc
+        $group: {
+          _id: { label: "$normLabel", value: "$normValue" },
+          count: { $sum: 1 },
+          firstLabel: { $first: "$originalLabel" },
+          firstValue: { $first: "$originalValue" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          label: "$firstLabel",
+          value: "$firstValue",
+          count: 1,
+        },
+      },
+      { $sort: { label: 1, value: 1 } },
+    ]);
+
+    return res.json({ options: results }); // [{label, value, count}]
+  } catch (err) {
+    console.error("Lỗi getAvailableOptions:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
