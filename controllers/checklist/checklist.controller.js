@@ -1,7 +1,7 @@
 const Checklist = require("../../models/checklist/checklist");
 const dayjs = require("dayjs");
-const utc = require('dayjs/plugin/utc');
-const timezone = require('dayjs/plugin/timezone');
+const utc = require("dayjs/plugin/utc");
+const timezone = require("dayjs/plugin/timezone");
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -19,7 +19,14 @@ exports.createChecklist = async (req, res) => {
 
     // Kiểm tra xem option_da_chon có đúng định dạng không
     if (req.body.option_da_chon && !Array.isArray(req.body.option_da_chon)) {
-      return res.status(400).json({ error: "Trường option_da_chon phải là mảng." });
+      return res
+        .status(400)
+        .json({ error: "Trường option_da_chon phải là mảng." });
+    }
+
+    // SET THỜI GIAN THEO TIMEZONE VN
+    if (!req.body.ngay_tao) {
+      req.body.ngay_tao = dayjs().tz("Asia/Ho_Chi_Minh").toDate();
     }
 
     const checklist = new Checklist(req.body);
@@ -40,12 +47,12 @@ exports.getAllChecklist = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // Lấy các tham số filter
-    const search = req.query.search || '';
-    const searchMaNV = req.query.searchMaNV || '';
-    const selectedOption = req.query.selectedOption || '';
+    const search = req.query.search || "";
+    const searchMaNV = req.query.searchMaNV || "";
+    const selectedOption = req.query.selectedOption || "";
     const startDate = req.query.startDate;
     const endDate = req.query.endDate;
-    
+
     // Tạo query filter
     let filter = {};
     let andConditions = [];
@@ -54,41 +61,44 @@ exports.getAllChecklist = async (req, res) => {
     if (search) {
       andConditions.push({
         $or: [
-          { ma_nhan_vien: { $regex: search, $options: 'i' } },
-          { ho_ten: { $regex: search, $options: 'i' } },
-          { 'option_da_chon.value': { $regex: search, $options: 'i' } }
-        ]
+          { ma_nhan_vien: { $regex: search, $options: "i" } },
+          { ho_ten: { $regex: search, $options: "i" } },
+          { "option_da_chon.value": { $regex: search, $options: "i" } },
+        ],
       });
     }
 
     // Filter theo mã nhân viên
     if (searchMaNV) {
       andConditions.push({
-        ma_nhan_vien: { $regex: searchMaNV, $options: 'i' }
+        ma_nhan_vien: { $regex: searchMaNV, $options: "i" },
       });
     }
 
     // Filter theo option đã chọn (format: "label: value")
     if (selectedOption) {
-      const [label, value] = selectedOption.split(':').map(s => s.trim());
+      const [label, value] = selectedOption.split(":").map((s) => s.trim());
       if (label && value) {
         andConditions.push({
           option_da_chon: {
             $elemMatch: {
-              label: { $regex: `^\\s*${label}\\s*$`, $options: 'i' },
-              value: { $regex: `^\\s*${value}\\s*$`, $options: 'i' }
-            }
-          }
+              label: { $regex: `^\\s*${label}\\s*$`, $options: "i" },
+              value: { $regex: `^\\s*${value}\\s*$`, $options: "i" },
+            },
+          },
         });
       }
     }
 
-    // Filter theo khoảng ngày
+    // Filter theo khoảng ngày - FIX TIMEZONE VN
     if (startDate && endDate) {
-      const start = dayjs(startDate).startOf('day').toDate();
-      const end = dayjs(endDate).endOf('day').toDate();
+      const start = dayjs
+        .tz(startDate, "Asia/Ho_Chi_Minh")
+        .startOf("day")
+        .toDate();
+      const end = dayjs.tz(endDate, "Asia/Ho_Chi_Minh").endOf("day").toDate();
       andConditions.push({
-        ngay_tao: { $gte: start, $lte: end }
+        ngay_tao: { $gte: start, $lte: end },
       });
     }
 
@@ -115,8 +125,8 @@ exports.getAllChecklist = async (req, res) => {
         totalItems: total,
         itemsPerPage: limit,
         hasNextPage: page < totalPages,
-        hasPrevPage: page > 1
-      }
+        hasPrevPage: page > 1,
+      },
     });
   } catch (err) {
     console.error("Lỗi getAllChecklist:", err);
@@ -128,19 +138,19 @@ exports.getAllChecklist = async (req, res) => {
 exports.getCheckListsByFormId = async (req, res) => {
   try {
     const { formId } = req.params;
-    
+
     // Lấy tham số phân trang từ query string
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
     // Lấy các tham số filter
-    const search = req.query.search || '';
-    const searchMaNV = req.query.searchMaNV || '';
-    const selectedOption = req.query.selectedOption || '';
+    const search = req.query.search || "";
+    const searchMaNV = req.query.searchMaNV || "";
+    const selectedOption = req.query.selectedOption || "";
     const startDate = req.query.startDate;
     const endDate = req.query.endDate;
-    
+
     // Tạo query filter - bắt đầu với form_id
     let filter = { form_id: formId };
     let andConditions = [{ form_id: formId }];
@@ -149,41 +159,44 @@ exports.getCheckListsByFormId = async (req, res) => {
     if (search) {
       andConditions.push({
         $or: [
-          { ma_nhan_vien: { $regex: search, $options: 'i' } },
-          { ho_ten: { $regex: search, $options: 'i' } },
-          { 'option_da_chon.value': { $regex: search, $options: 'i' } }
-        ]
+          { ma_nhan_vien: { $regex: search, $options: "i" } },
+          { ho_ten: { $regex: search, $options: "i" } },
+          { "option_da_chon.value": { $regex: search, $options: "i" } },
+        ],
       });
     }
 
     // Filter theo mã nhân viên
     if (searchMaNV) {
       andConditions.push({
-        ma_nhan_vien: { $regex: searchMaNV, $options: 'i' }
+        ma_nhan_vien: { $regex: searchMaNV, $options: "i" },
       });
     }
 
     // Filter theo option đã chọn (format: "label: value")
     if (selectedOption) {
-      const [label, value] = selectedOption.split(':').map(s => s.trim());
+      const [label, value] = selectedOption.split(":").map((s) => s.trim());
       if (label && value) {
         andConditions.push({
           option_da_chon: {
             $elemMatch: {
-              label: { $regex: `^\\s*${label}\\s*$`, $options: 'i' },
-              value: { $regex: `^\\s*${value}\\s*$`, $options: 'i' }
-            }
-          }
+              label: { $regex: `^\\s*${label}\\s*$`, $options: "i" },
+              value: { $regex: `^\\s*${value}\\s*$`, $options: "i" },
+            },
+          },
         });
       }
     }
 
-    // Filter theo khoảng ngày
+    // Filter theo khoảng ngày - FIX TIMEZONE VN
     if (startDate && endDate) {
-      const start = dayjs(startDate).startOf('day').toDate();
-      const end = dayjs(endDate).endOf('day').toDate();
+      const start = dayjs
+        .tz(startDate, "Asia/Ho_Chi_Minh")
+        .startOf("day")
+        .toDate();
+      const end = dayjs.tz(endDate, "Asia/Ho_Chi_Minh").endOf("day").toDate();
       andConditions.push({
-        ngay_tao: { $gte: start, $lte: end }
+        ngay_tao: { $gte: start, $lte: end },
       });
     }
 
@@ -210,8 +223,8 @@ exports.getCheckListsByFormId = async (req, res) => {
         totalItems: total,
         itemsPerPage: limit,
         hasNextPage: page < totalPages,
-        hasPrevPage: page > 1
-      }
+        hasPrevPage: page > 1,
+      },
     });
   } catch (error) {
     console.error("Lỗi khi lấy checklist theo form:", error);
@@ -256,13 +269,13 @@ exports.checkDuplicate = async (req, res) => {
   }
 
   // Sử dụng múi giờ VN để reset đúng 00:00 VN
-  const start = dayjs().tz('Asia/Ho_Chi_Minh').startOf("day").toDate();    
-  const end = dayjs().tz('Asia/Ho_Chi_Minh').endOf("day").toDate();
+  const start = dayjs().tz("Asia/Ho_Chi_Minh").startOf("day").toDate();
+  const end = dayjs().tz("Asia/Ho_Chi_Minh").endOf("day").toDate();
 
   // Debug log (có thể xóa sau khi test xong)
-  console.log('VN Start:', start);
-  console.log('VN End:', end);
-  console.log('Current VN:', dayjs().tz('Asia/Ho_Chi_Minh').toDate());
+  console.log("VN Start:", start);
+  console.log("VN End:", end);
+  console.log("Current VN:", dayjs().tz("Asia/Ho_Chi_Minh").toDate());
 
   try {
     const checklist = await Checklist.findOne({
@@ -270,7 +283,7 @@ exports.checkDuplicate = async (req, res) => {
       option_da_chon: {
         $elemMatch: {
           label: { $regex: /^\s*Số hiệu xe\s*$/i },
-          value: { $regex: `^\\s*${soHieuXe}\\s*$`, $options: "i" }
+          value: { $regex: `^\\s*${soHieuXe}\\s*$`, $options: "i" },
         },
       },
       ngay_tao: { $gte: start, $lte: end },
@@ -278,8 +291,8 @@ exports.checkDuplicate = async (req, res) => {
 
     if (checklist) {
       // Debug log
-      console.log('Found checklist ngay_tao:', checklist.ngay_tao);
-      
+      console.log("Found checklist ngay_tao:", checklist.ngay_tao);
+
       return res.json({
         exists: true,
         ma_nhan_vien: checklist.ma_nhan_vien,
@@ -293,6 +306,7 @@ exports.checkDuplicate = async (req, res) => {
     res.status(500).json({ error: "Lỗi kiểm tra số hiệu xe nâng." });
   }
 };
+
 exports.getAvailableOptions = async (req, res) => {
   try {
     const { formId } = req.params;
@@ -300,12 +314,17 @@ exports.getAvailableOptions = async (req, res) => {
 
     if (!formId) return res.status(400).json({ error: "Thiếu formId." });
     if (!startDate || !endDate) {
-      return res.status(400).json({ error: "Thiếu startDate hoặc endDate (YYYY-MM-DD)." });
+      return res
+        .status(400)
+        .json({ error: "Thiếu startDate hoặc endDate (YYYY-MM-DD)." });
     }
 
-    // Cắt ngày theo múi giờ VN để không lệch ngày
-    const start = dayjs.tz(startDate, "Asia/Ho_Chi_Minh").startOf("day").toDate();
-    const end   = dayjs.tz(endDate,   "Asia/Ho_Chi_Minh").endOf("day").toDate();
+    // Cắt ngày theo múi giờ VN để không lệch ngày - FIX TIMEZONE
+    const start = dayjs
+      .tz(startDate, "Asia/Ho_Chi_Minh")
+      .startOf("day")
+      .toDate();
+    const end = dayjs.tz(endDate, "Asia/Ho_Chi_Minh").endOf("day").toDate();
 
     const results = await Checklist.aggregate([
       {
@@ -322,10 +341,14 @@ exports.getAvailableOptions = async (req, res) => {
           originalLabel: { $ifNull: ["$option_da_chon.label", ""] },
           originalValue: { $ifNull: ["$option_da_chon.value", ""] },
           normLabel: {
-            $toLower: { $trim: { input: { $ifNull: ["$option_da_chon.label", ""] } } },
+            $toLower: {
+              $trim: { input: { $ifNull: ["$option_da_chon.label", ""] } },
+            },
           },
           normValue: {
-            $toLower: { $trim: { input: { $ifNull: ["$option_da_chon.value", ""] } } },
+            $toLower: {
+              $trim: { input: { $ifNull: ["$option_da_chon.value", ""] } },
+            },
           },
         },
       },
