@@ -21,9 +21,18 @@ app.use(cors({
   credentials: true,
 }));
 
-// ✅ Middleware xử lý JSON & form
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// ✅ Middleware xử lý JSON & form - THÊM LIMIT Ở ĐÂY
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// ✅ (Optional) Middleware log request size để debug
+app.use((req, res, next) => {
+  if (req.body && Object.keys(req.body).length > 0) {
+    const size = JSON.stringify(req.body).length;
+    console.log(`📦 Request size: ${(size / 1024).toFixed(2)} KB - Path: ${req.path}`);
+  }
+  next();
+});
 
 // ✅ Routes
 const userRoutes = require("./routes/users/user.routes");
@@ -31,14 +40,15 @@ const checklistRoutes = require("./routes/checklist/checklist.routes");
 const authRoutes = require("./routes/auth/auth.routes");
 const checklistformRoutes = require("./routes/checklistform/checklistform.routes");
 const staffRoutes = require("./routes/staff/staff.routes");
-const cuaHangRoutes =  require("./routes/dieuvan/cuahang/cuahang.routes");
-const rotKienRoutes =  require("./routes/dieuvan/rotkien/rotkien.routes");
+const cuaHangRoutes = require("./routes/dieuvan/cuahang/cuahang.routes");
+const rotKienRoutes = require("./routes/dieuvan/rotkien/rotkien.routes");
 const checklistBDHFormRoutes = require("./routes/checklistformbdh/checklistformbdh.routes");
 const checklistBDHRoutes = require("./routes/checklistbdh/checklistbdh.routes");
 const kpiStaff = require("./routes/kpistaff/kpi.routes");
 const checkKpiStaff = require("./routes/checkkpistaff/checkkpistaff.routes");
 const formKpiStaff = require("./routes/formkpistaff/formkpistaff.routes");
 const xuatTraRoutes = require("./routes/dieuvan/xuattra/xuattra.routes.js");
+const phieuSoanRoutes = require("./routes/phieusoan/phieusoan.routes.js");
 
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
@@ -53,11 +63,7 @@ app.use("/api/saigoncoop", kpiStaff);
 app.use("/api/saigoncoop", checkKpiStaff);
 app.use("/api/saigoncoop", formKpiStaff);
 app.use("/api/saigoncoop", xuatTraRoutes);
-
-
-
-
-
+app.use("/api/saigoncoop", phieuSoanRoutes);
 
 // ✅ Kết nối MongoDB
 mongoose

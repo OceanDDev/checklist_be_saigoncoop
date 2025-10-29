@@ -112,3 +112,15 @@ exports.createManyCuahang = async (req, res) => {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
+
+exports.getCuahangByMaCH = async (req, res) => {
+  try {
+    const cuahang = await Cuahang.findOne({ maCH: req.params.maCH });
+    if (!cuahang) {
+      return res.status(404).json({ message: "Không tìm thấy cửa hàng" });
+    }
+    res.json({ data: cuahang });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+}
