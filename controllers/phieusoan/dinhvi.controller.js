@@ -31,6 +31,13 @@ const HEADER_MAP = {
   "NGAY NHAP": "ngay_import",
   NGAY_TAO: "ngay_import",
   LOAIHÌNH: "loaiHinh",
+  MANCC: "maNCC",
+  MA_NCC: "maNCC",
+  MANH: "maNH",
+  MA_NH: "maNH",
+  DEPT: "Dept",
+  SUBDEPT: "SubDept",
+  SUB_DEPT: "SubDept",
 };
 
 function toDateOrNull(v) {
@@ -75,6 +82,10 @@ exports.getAllDinhVi = async (req, res) => {
       name,
       pack,
       loaiHinh,
+      maNCC,
+      maNH,
+      Dept,
+      SubDept,
       search,
       startDate,
       endDate,
@@ -86,6 +97,10 @@ exports.getAllDinhVi = async (req, res) => {
     if (slot)     filter.slot = { $regex: String(slot), $options: "i" };
     if (name)     filter.name = { $regex: String(name), $options: "i" };
     if (loaiHinh) filter.loaiHinh = { $regex: String(loaiHinh), $options: "i" };
+    if (maNCC)    filter.maNCC = { $regex: String(maNCC), $options: "i" };
+    if (maNH)     filter.maNH = { $regex: String(maNH), $options: "i" };
+    if (Dept)     filter.Dept = { $regex: String(Dept), $options: "i" };
+    if (SubDept)  filter.SubDept = { $regex: String(SubDept), $options: "i" };
 
     // ✅ SKU là Number - so sánh chính xác hoặc prefix
     if (sku) {
@@ -113,7 +128,7 @@ exports.getAllDinhVi = async (req, res) => {
       if (endDate)   filter.ngay_import.$lte = new Date(`${endDate}T23:59:59.999Z`);
     }
 
-    // ✅ Search thông minh: số -> SKU/Pack, text -> Slot/Name/LoaiHinh
+    // ✅ Search thông minh: số -> SKU/Pack, text -> Slot/Name/LoaiHinh/maNCC/maNH/Dept/SubDept
     if (search) {
       const kw = String(search).trim();
       const kwNum = parseInt(kw);
@@ -122,6 +137,10 @@ exports.getAllDinhVi = async (req, res) => {
         { slot: { $regex: kw, $options: "i" } },
         { name: { $regex: kw, $options: "i" } },
         { loaiHinh: { $regex: kw, $options: "i" } },
+        { maNCC: { $regex: kw, $options: "i" } },
+        { maNH: { $regex: kw, $options: "i" } },
+        { Dept: { $regex: kw, $options: "i" } },
+        { SubDept: { $regex: kw, $options: "i" } },
       ];
       
       // Nếu search là số hợp lệ -> thêm điều kiện tìm SKU và Pack
@@ -250,11 +269,15 @@ exports.importManyDinhVi = async (req, res) => {
       
       const out = {
         slot: item.slot || "",
-        sku: isNaN(sku) ? null : sku,          // ✅ Number
+        sku: isNaN(sku) ? null : sku,
         name: item.name || "",
-        pack: isNaN(pack) ? null : pack,        // ✅ Number
+        pack: isNaN(pack) ? null : pack,
         loaiHinh: item.loaiHinh || (pack === 1 ? "Hàng Đặc Thù" : "Hàng bình thường"),
         ngay_import: item.ngay_import || new Date(),
+        maNCC: item.maNCC || item.mancc || "",
+        maNH: item.maNH || item.manh || "",
+        Dept: item.Dept || item.dept || "",
+        SubDept: item.SubDept || item.subdept || "",
       };
       return out;
     });
@@ -270,7 +293,7 @@ exports.importManyDinhVi = async (req, res) => {
     if (invalidRows.length > 0) {
       return res.status(400).json({
         message: `Có ${invalidRows.length} dòng thiếu hoặc sai định dạng (slot/sku/name/pack phải hợp lệ)`,
-        invalidRows: invalidRows.slice(0, 5), // Show 5 dòng đầu
+        invalidRows: invalidRows.slice(0, 5),
       });
     }
 
@@ -297,6 +320,10 @@ exports.importManyDinhVi = async (req, res) => {
               name: doc.name,
               pack: doc.pack,
               loaiHinh: doc.loaiHinh,
+              maNCC: doc.maNCC,
+              maNH: doc.maNH,
+              Dept: doc.Dept,
+              SubDept: doc.SubDept,
             },
             $setOnInsert: { ngay_import: doc.ngay_import },
           },

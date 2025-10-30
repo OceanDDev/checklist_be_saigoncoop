@@ -3,6 +3,10 @@ const mongoose = require("mongoose");
 const phieuSoanSchema = new mongoose.Schema({
   don_hang_id: { type: mongoose.Schema.Types.ObjectId, ref: "DonHang", required: true },
   phieu_soan_id: { type: String, unique: true, index: true },
+  maNCC: { type: String },
+  maNH: { type: String },
+  Dept: { type: String },
+  SubDept: { type: String },
   store: { type: String, required: true },
   type: { type: String, required: false },
   soda_transfer: { type: Number, required: true },
