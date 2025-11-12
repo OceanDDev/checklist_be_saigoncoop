@@ -30,7 +30,6 @@ const phieuSoanSchema = new mongoose.Schema({
 phieuSoanSchema.index({ loai_hang: 1, trang_thai: 1 });
 phieuSoanSchema.index({ pack: 1 });
 phieuSoanSchema.index({ don_hang_id: 1 });
-phieuSoanSchema.index({ phieu_soan_id: 1 });
 
 // ---- ID generator
 async function generatePhieuSoanId(doc) {

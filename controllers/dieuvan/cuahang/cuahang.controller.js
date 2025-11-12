@@ -85,6 +85,7 @@ exports.deleteCuahang = async (req, res) => {
   }
 };
 // Thêm nhiều cửa hàng cùng lúc
+// Thêm nhiều cửa hàng cùng lúc
 exports.createManyCuahang = async (req, res) => {
   try {
     const cuahangs = req.body; // nhận mảng các cửa hàng [{...}, {...}]
@@ -93,26 +94,56 @@ exports.createManyCuahang = async (req, res) => {
       return res.status(400).json({ message: "Dữ liệu không hợp lệ" });
     }
 
-    // Kiểm tra trùng maCH
+    // Kiểm tra trùng maCH với database
     const maCHs = cuahangs.map((ch) => ch.maCH);
-    const duplicates = await Cuahang.find({ maCH: { $in: maCHs } });
+    const existingCuahangs = await Cuahang.find({ maCH: { $in: maCHs } });
+    const existingMaCHs = existingCuahangs.map((ch) => ch.maCH);
 
-    if (duplicates.length > 0) {
+    // Tách các cửa hàng không trùng và bị trùng
+    const validCuahangs = cuahangs.filter(
+      (ch) => !existingMaCHs.includes(ch.maCH)
+    );
+    const duplicateCuahangs = cuahangs.filter((ch) =>
+      existingMaCHs.includes(ch.maCH)
+    );
+
+    // Nếu không có cửa hàng nào hợp lệ
+    if (validCuahangs.length === 0) {
       return res.status(400).json({
-        message: "Một số mã cửa hàng đã tồn tại",
-        duplicates: duplicates.map((d) => d.maCH),
+        message: "Tất cả mã cửa hàng đã tồn tại",
+        duplicates: duplicateCuahangs.map((ch) => ({
+          maCH: ch.maCH,
+          tenCH: ch.tenCH,
+        })),
+        inserted: [],
       });
     }
 
-    const inserted = await Cuahang.insertMany(cuahangs);
-    res
-      .status(201)
-      .json({ message: "Thêm nhiều cửa hàng thành công", data: inserted });
+    // Thêm các cửa hàng hợp lệ vào database
+    const inserted = await Cuahang.insertMany(validCuahangs);
+
+    // Trả về kết quả
+    const response = {
+      message: `Thêm thành công ${inserted.length} cửa hàng`,
+      inserted: inserted,
+      total: cuahangs.length,
+      success: inserted.length,
+      failed: duplicateCuahangs.length,
+    };
+
+    // Thêm thông tin về các cửa hàng bị trùng nếu có
+    if (duplicateCuahangs.length > 0) {
+      response.duplicates = duplicateCuahangs.map((ch) => ({
+        maCH: ch.maCH,
+        tenCH: ch.tenCH,
+      }));
+    }
+
+    res.status(201).json(response);
   } catch (error) {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
-
 exports.getCuahangByMaCH = async (req, res) => {
   try {
     const cuahang = await Cuahang.findOne({ maCH: req.params.maCH });
@@ -123,4 +154,4 @@ exports.getCuahangByMaCH = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
-}
+};
