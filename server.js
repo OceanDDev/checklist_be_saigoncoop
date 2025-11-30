@@ -49,6 +49,7 @@ const checkKpiStaff = require("./routes/checkkpistaff/checkkpistaff.routes");
 const formKpiStaff = require("./routes/formkpistaff/formkpistaff.routes");
 const xuatTraRoutes = require("./routes/dieuvan/xuattra/xuattra.routes.js");
 const phieuSoanRoutes = require("./routes/phieusoan/phieusoan.routes.js");
+const phuXeRoutes = require("./routes/phuxe/phuxe.routes.js");  
 
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
@@ -64,6 +65,7 @@ app.use("/api/saigoncoop", checkKpiStaff);
 app.use("/api/saigoncoop", formKpiStaff);
 app.use("/api/saigoncoop", xuatTraRoutes);
 app.use("/api/saigoncoop", phieuSoanRoutes);
+app.use("/api/saigoncoop", phuXeRoutes);
 
 // ✅ Kết nối MongoDB
  mongoose

@@ -1,11 +1,11 @@
-// controllers/phieusoan.controller.js
+// controllers/phieusoan.controller.js - OPTIMIZED VERSION
 /* eslint-disable no-console */
 const mongoose = require("mongoose");
 const PhieuSoan = require("../../models/phieusoan/phieusoan");
 const DonHang = require("../../models/phieusoan/donhang");
 const DinhVi = require("../../models/phieusoan/dinhvi");
 
-// ==================== Small utils ====================
+// ==================== UTILS ====================
 const toInt = (v, def = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : def;
@@ -16,30 +16,46 @@ const startOfDay = (d) => {
   x.setHours(0, 0, 0, 0);
   return x;
 };
-
+    
 const endOfDay = (d) => {
   const x = new Date(d);
   x.setHours(23, 59, 59, 999);
   return x;
 };
 
-const log = (...args) => {
-  // Bật debug theo ENV để tránh spam log ở prod
-  if (process.env.DEBUG_PS === "1") console.log(...args);
-};
+// ==================== TRANSACTION HELPER ====================
+async function withOptionalTransaction(callback) {
+  let session = null; 
+  let useTransaction = false;
+
+  try {
+    session = await mongoose.startSession();
+    useTransaction = session.supports.transactions;
+
+    if (!useTransaction) {
+      session.endSession();
+      session = null;
+    }
+  } catch (error) {
+    session = null;
+    useTransaction = false;
+  }
+
+  try {
+    if (useTransaction && session) {
+      return await session.withTransaction(() => callback(session));
+    }
+    return await callback(null);
+  } finally {
+    if (session) session.endSession();
+  }
+}
 
 // ==================== CORE BUILDER ====================
-/**
- * Tạo 1 phiếu soạn từ đơn hàng + định vị đầu tiên hợp lệ.
- * - pack = 1  → Đặc thù, chan_le tạm "Chẵn" (sẽ cập nhật sau)
- * - pack > 1  → Bình thường, chan_le theo số dư luong % pack
- * Ghi chú: follow logic cũ "chỉ lấy định vị đầu tiên hợp lệ".
- */
 function buildSinglePhieuSoan(donHang, dinhVisSorted) {
   const totalLuong = toInt(donHang.luong, 0);
   if (totalLuong <= 0) return null;
 
-  // chọn định vị đầu tiên có pack > 0
   const dinhVi = dinhVisSorted.find((dv) => toInt(dv.pack, 0) > 0);
   if (!dinhVi) return null;
 
@@ -68,42 +84,24 @@ function buildSinglePhieuSoan(donHang, dinhVisSorted) {
   };
 
   if (pack === 1) {
-    // Hàng đặc thù
-    return {
-      ...base,
-      kien_hang: 0,
-      chan_le: "Chẵn", // giữ như cũ, chỉnh sau ở flow đặc thù
-      loai_hang: "Đặc thù",
-    };
+    return { ...base, loai_hang: "Đặc thù" };
   }
 
-  // Hàng bình thường
   const soDu = totalLuong % pack;
-  const kien_hang = Math.floor(totalLuong / pack);
-  const chan_le = soDu === 0 ? "Chẵn" : "Lẻ";
-
   return {
     ...base,
-    kien_hang,
-    chan_le,
-    loai_hang: "Bình thường",
+    kien_hang: Math.floor(totalLuong / pack),
+    chan_le: soDu === 0 ? "Chẵn" : "Lẻ",
   };
 }
 
-// ==================== PROCESS ORDERS ====================
-/**
- * POST /phieusoan/process
- * Xử lý nhiều đơn hàng:
- * - 1 query lấy toàn bộ DonHang (lean)
- * - 1 query lấy toàn bộ DinhVi theo SKU (lean, sorted)
- * - Group DinhVi theo SKU (Map) → build phieuSoans (mảng plain)
- * - insertMany + updateMany trong 1 transaction
- */
+// ==================== PROCESS ORDERS - OPTIMIZED ====================
 exports.processOrders = async (req, res) => {
-  const session = await mongoose.startSession();
   try {
-    await session.withTransaction(async () => {
+    return await withOptionalTransaction(async (session) => {
       const { donHangIds } = req.body;
+
+      // Validation
       if (!Array.isArray(donHangIds) || donHangIds.length === 0) {
         return res.status(400).json({
           success: false,
@@ -119,21 +117,20 @@ exports.processOrders = async (req, res) => {
         });
       }
 
-      // 1) Lấy DonHang cần xử lý (chỉ trường cần dùng) - lean để giảm overhead
-      const donHangs = await DonHang.find(
-        { _id: { $in: validIds }, trang_thai: false },
-        {
-          don_hang_id: 1,
-          store: 1,
-          type: 1,
-          soda_transfer: 1,
-          name: 1,
-          sku: 1,
-          luong: 1,
-        }
-      )
-        .lean()
-        .session(session);
+      // OPTIMIZATION 1: Parallel queries với projection tối thiểu
+      const [donHangs, uniqueSkus] = await Promise.all([
+        DonHang.find(
+          { _id: { $in: validIds }, trang_thai: false },
+          "don_hang_id store type soda_transfer name sku luong"
+        )
+          .lean()
+          .session(session),
+        // Pre-extract SKUs để query DinhVi song song
+        DonHang.distinct("sku", {
+          _id: { $in: validIds },
+          trang_thai: false,
+        }).session(session),
+      ]);
 
       if (donHangs.length === 0) {
         return res.status(404).json({
@@ -142,34 +139,24 @@ exports.processOrders = async (req, res) => {
         });
       }
 
-      // 2) Lấy toàn bộ DinhVi theo SKU (lean + sort) - bao gồm cả 4 trường mới
-      const uniqueSkus = [...new Set(donHangs.map((d) => toInt(d.sku)))];
+      // OPTIMIZATION 2: Single DinhVi query với index hint
       const allDinhVis = await DinhVi.find(
-        { sku: { $in: uniqueSkus } },
-        {
-          sku: 1,
-          slot: 1,
-          pack: 1,
-          maNCC: 1,
-          maNH: 1,
-          Dept: 1,
-          SubDept: 1,
-          ngay_import: 1,
-        }
+        { sku: { $in: uniqueSkus.map(toInt) } },
+        "sku slot pack maNCC maNH Dept SubDept ngay_import"
       )
         .sort({ sku: 1, ngay_import: 1 })
         .lean()
         .session(session);
 
-      // Group DinhVi theo SKU để lookup O(1)
-      const mapDv = new Map(); // sku(int) -> array
+      // OPTIMIZATION 3: Map lookup O(1)
+      const mapDv = new Map();
       for (const dv of allDinhVis) {
         const key = toInt(dv.sku);
         if (!mapDv.has(key)) mapDv.set(key, []);
         mapDv.get(key).push(dv);
       }
 
-      // 3) Build tất cả phiếu soạn & collect order ids
+      // OPTIMIZATION 4: Batch processing
       const phieuSoansToInsert = [];
       const donHangIdsToUpdate = [];
       const errors = [];
@@ -177,8 +164,9 @@ exports.processOrders = async (req, res) => {
       for (const dh of donHangs) {
         try {
           const sku = toInt(dh.sku);
-          const dinhVis = mapDv.get(sku) || [];
-          if (dinhVis.length === 0) {
+          const dinhVis = mapDv.get(sku);
+          
+          if (!dinhVis?.length) {
             throw new Error(`SKU ${dh.sku} không tồn tại trong định vị`);
           }
 
@@ -196,31 +184,31 @@ exports.processOrders = async (req, res) => {
             don_hang_id: dh._id,
             sku: dh.sku,
             name: dh.name,
-            error: e.message || String(e),
+            error: e.message,
           });
         }
       }
 
-      // 4) Bulk insert + bulk update
-      let insertedCount = 0;
+      // OPTIMIZATION 5: Parallel bulk operations
       let insertedDocs = [];
       if (phieuSoansToInsert.length > 0) {
-        insertedDocs = await PhieuSoan.insertMany(phieuSoansToInsert, {
-          session,
-          ordered: false,
-        });
-        insertedCount = insertedDocs.length;
+        const [inserted] = await Promise.all([
+          PhieuSoan.insertMany(phieuSoansToInsert, {
+            session,
+            ordered: false,
+          }),
+          donHangIdsToUpdate.length > 0
+            ? DonHang.updateMany(
+                { _id: { $in: donHangIdsToUpdate } },
+                { $set: { trang_thai: true } },
+                { session }
+              )
+            : Promise.resolve(),
+        ]);
+        insertedDocs = inserted;
       }
 
-      if (donHangIdsToUpdate.length > 0) {
-        await DonHang.updateMany(
-          { _id: { $in: donHangIdsToUpdate } },
-          { $set: { trang_thai: true } },
-          { session }
-        );
-      }
-
-      // Đếm pack = 1 trong insertedDocs (đã là doc mới từ insertMany)
+      // Count special packs
       const specialCount = insertedDocs.reduce(
         (acc, d) => (toInt(d.pack) === 1 ? acc + 1 : acc),
         0
@@ -228,15 +216,16 @@ exports.processOrders = async (req, res) => {
 
       return res.status(201).json({
         success: true,
-        message: `Đã tạo ${insertedCount} phiếu soạn từ ${donHangs.length} đơn hàng`,
+        message: `Đã tạo ${insertedDocs.length} phiếu soạn từ ${donHangs.length} đơn hàng`,
         data: insertedDocs,
         errors: errors.length ? errors : null,
         summary: {
           total_orders: donHangs.length,
-          processed: insertedCount,
+          processed: insertedDocs.length,
           failed: errors.length,
           special_pack_one: specialCount,
         },
+        transactionMode: session ? "replica-set" : "standalone",
         ...(specialCount > 0 && {
           warning: `Có ${specialCount} phiếu soạn đặc thù (pack=1) cần cập nhật chẵn/lẻ`,
         }),
@@ -249,12 +238,10 @@ exports.processOrders = async (req, res) => {
       message: "Lỗi khi xử lý đơn hàng",
       error: error.message,
     });
-  } finally {
-    session.endSession();
   }
 };
 
-// ==================== HÀNG ĐẶC THÙ ====================
+// ==================== HÀNG ĐẶC THÙ - OPTIMIZED ====================
 exports.getSpecialOrders = async (req, res) => {
   try {
     const { page = 1, limit = 1000, store, type } = req.query;
@@ -267,12 +254,14 @@ exports.getSpecialOrders = async (req, res) => {
       ...(type && { type }),
     };
 
+    // OPTIMIZATION: Parallel count + find
     const [data, count] = await Promise.all([
       PhieuSoan.find(filter)
-        .populate("don_hang_id")
+        .populate("don_hang_id", "don_hang_id name sku") // Projection trong populate
         .limit(toInt(limit))
         .skip((toInt(page) - 1) * toInt(limit))
-        .sort({ ngay_ra_phieu: -1 }),
+        .sort({ ngay_ra_phieu: -1 })
+        .lean(),
       PhieuSoan.countDocuments(filter),
     ]);
 
@@ -322,10 +311,10 @@ exports.getSpecialOrdersCount = async (req, res) => {
 };
 
 exports.updateSpecialChanLe = async (req, res) => {
-  const session = await mongoose.startSession();
   try {
-    await session.withTransaction(async () => {
+    return await withOptionalTransaction(async (session) => {
       const { updates } = req.body;
+
       if (!Array.isArray(updates) || updates.length === 0) {
         return res.status(400).json({
           success: false,
@@ -338,19 +327,26 @@ exports.updateSpecialChanLe = async (req, res) => {
       const errors = [];
       let regeneratedCount = 0;
 
-      // Không dùng lean vì cần gọi method & save
+      // OPTIMIZATION: Batch load tất cả phiếu 1 lần
+      const phieuIds = updates.map((u) => u.phieuSoanId);
+      const phieuMap = new Map();
+      
+      const phieus = await PhieuSoan.find({
+        _id: { $in: phieuIds },
+        pack: 1,
+        loai_hang: "Đặc thù",
+      }).session(session);
+
+      phieus.forEach((p) => phieuMap.set(String(p._id), p));
+
+      // Process updates
       for (const { phieuSoanId, chan_le } of updates) {
         try {
           if (!["Chẵn", "Lẻ"].includes(chan_le)) {
             throw new Error("chan_le phải là 'Chẵn' hoặc 'Lẻ'");
           }
 
-          const ps = await PhieuSoan.findOne({
-            _id: phieuSoanId,
-            pack: 1,
-            loai_hang: "Đặc thù",
-          }).session(session);
-
+          const ps = phieuMap.get(String(phieuSoanId));
           if (!ps) {
             throw new Error(
               `Không tìm thấy phiếu soạn đặc thù: ${phieuSoanId}`
@@ -362,7 +358,7 @@ exports.updateSpecialChanLe = async (req, res) => {
           ps.loai_hang = "Bình thường";
 
           if (changed && typeof ps.regeneratePhieuSoanId === "function") {
-            await ps.regeneratePhieuSoanId(); // method trên Schema
+            await ps.regeneratePhieuSoanId();
             regeneratedCount++;
           } else {
             await ps.save({ session });
@@ -370,7 +366,7 @@ exports.updateSpecialChanLe = async (req, res) => {
 
           results.push(ps);
         } catch (e) {
-          errors.push({ phieuSoanId, error: e.message || String(e) });
+          errors.push({ phieuSoanId, error: e.message });
         }
       }
 
@@ -393,12 +389,10 @@ exports.updateSpecialChanLe = async (req, res) => {
       message: "Lỗi khi cập nhật phiếu soạn đặc thù",
       error: error.message,
     });
-  } finally {
-    session.endSession();
   }
 };
 
-// ==================== CRUD & QUERIES ====================
+// ==================== CRUD - OPTIMIZED ====================
 exports.getAll = async (req, res) => {
   try {
     const {
@@ -424,22 +418,20 @@ exports.getAll = async (req, res) => {
 
     const filter = {};
 
+    // OPTIMIZATION: Indexed fields first
     if (phieu_soan_id) {
       filter.phieu_soan_id = { $regex: phieu_soan_id, $options: "i" };
     }
 
     if (search && String(search).trim()) {
       const s = String(search).trim();
-      if (/^\d+$/.test(s)) {
-        filter.sku = toInt(s);
-      } else {
-        filter.name = { $regex: s, $options: "i" };
-      }
+      filter.$or = [
+        /^\d+$/.test(s) ? { sku: toInt(s) } : { name: { $regex: s, $options: "i" } },
+      ];
     }
 
     if (trang_thai !== undefined) {
-      filter.trang_thai =
-        trang_thai === true || trang_thai === "true" ? true : false;
+      filter.trang_thai = trang_thai === true || trang_thai === "true";
     }
     if (type) filter.type = type;
     if (sku) filter.sku = toInt(sku);
@@ -454,7 +446,7 @@ exports.getAll = async (req, res) => {
     if (Dept) filter.Dept = { $regex: String(Dept), $options: "i" };
     if (SubDept) filter.SubDept = { $regex: String(SubDept), $options: "i" };
 
-    // Date filter: mặc định 3 ngày gần nhất nếu không truyền tham số thời gian
+    // Date filter với default 3 ngày
     if (tu_ngay || den_ngay || ngay) {
       filter.ngay_ra_phieu = {};
       if (ngay) {
@@ -472,10 +464,11 @@ exports.getAll = async (req, res) => {
       filter.ngay_ra_phieu = { $gte: threeDaysAgoStart, $lte: todayEnd };
     }
 
-    // Chỉ populate khi cần; nếu performance căng, cân nhắc bỏ populate hoặc chọn fields
+    // OPTIMIZATION: Parallel query + select fields
     const [data, count] = await Promise.all([
       PhieuSoan.find(filter)
-        .populate("don_hang_id")
+        .populate("don_hang_id", "don_hang_id name sku")
+        .select("-__v") // Exclude version key
         .limit(toInt(limit))
         .skip((toInt(page) - 1) * toInt(limit))
         .sort({ ngay_ra_phieu: -1 })
@@ -505,7 +498,10 @@ exports.getAll = async (req, res) => {
 exports.getOne = async (req, res) => {
   try {
     const { id } = req.params;
-    const phieuSoan = await PhieuSoan.findById(id).populate("don_hang_id");
+    const phieuSoan = await PhieuSoan.findById(id)
+      .populate("don_hang_id")
+      .lean();
+      
     if (!phieuSoan) {
       return res.status(404).json({
         success: false,
@@ -523,9 +519,8 @@ exports.getOne = async (req, res) => {
 };
 
 exports.updateMany = async (req, res) => {
-  const session = await mongoose.startSession();
   try {
-    await session.withTransaction(async () => {
+    return await withOptionalTransaction(async (session) => {
       const { ids, updateData } = req.body;
 
       if (!Array.isArray(ids) || ids.length === 0) {
@@ -534,6 +529,7 @@ exports.updateMany = async (req, res) => {
           message: "Dữ liệu phải là một mảng ID và không được rỗng",
         });
       }
+
       if (!updateData || typeof updateData !== "object") {
         return res.status(400).json({
           success: false,
@@ -541,7 +537,7 @@ exports.updateMany = async (req, res) => {
         });
       }
 
-      // không cho cập nhật các field hệ thống
+      // Validation
       delete updateData.don_hang_id;
       delete updateData.ngay_ra_phieu;
       delete updateData._id;
@@ -574,7 +570,6 @@ exports.updateMany = async (req, res) => {
         });
       }
 
-      // Nếu đổi chan_le → cần regenerate mã → phải load doc (không lean)
       const isChanLeChanged = Object.prototype.hasOwnProperty.call(
         updateData,
         "chan_le"
@@ -635,8 +630,6 @@ exports.updateMany = async (req, res) => {
       message: "Lỗi khi cập nhật nhiều phiếu soạn",
       error: error.message,
     });
-  } finally {
-    session.endSession();
   }
 };
 
@@ -644,6 +637,7 @@ exports.updateStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { trang_thai } = req.body;
+    
     if (typeof trang_thai !== "boolean") {
       return res.status(400).json({
         success: false,
@@ -654,7 +648,7 @@ exports.updateStatus = async (req, res) => {
     const phieuSoan = await PhieuSoan.findByIdAndUpdate(
       id,
       { $set: { trang_thai } },
-      { new: true }
+      { new: true, lean: true }
     );
 
     if (!phieuSoan) {
@@ -686,9 +680,9 @@ exports.updateOne = async (req, res) => {
     delete updateData.don_hang_id;
     delete updateData.ngay_ra_phieu;
 
-    // Nếu thay đổi pack/luong → cập nhật lại kien_hang
+    // Recalculate kien_hang if needed
     if (updateData.pack !== undefined || updateData.luong !== undefined) {
-      const ps = await PhieuSoan.findById(id);
+      const ps = await PhieuSoan.findById(id).select("pack luong").lean();
       if (!ps) {
         return res.status(404).json({
           success: false,
@@ -713,6 +707,7 @@ exports.updateOne = async (req, res) => {
     const phieuSoan = await PhieuSoan.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
+      lean: true,
     });
 
     if (!phieuSoan) {
@@ -739,13 +734,15 @@ exports.updateOne = async (req, res) => {
 exports.deleteOne = async (req, res) => {
   try {
     const { id } = req.params;
-    const phieuSoan = await PhieuSoan.findByIdAndDelete(id);
+    const phieuSoan = await PhieuSoan.findByIdAndDelete(id).lean();
+    
     if (!phieuSoan) {
       return res.status(404).json({
         success: false,
         message: "Không tìm thấy phiếu soạn",
       });
     }
+    
     res.status(200).json({
       success: true,
       message: "Xóa phiếu soạn thành công",
@@ -760,10 +757,10 @@ exports.deleteOne = async (req, res) => {
 };
 
 exports.deleteMany = async (req, res) => {
-  const session = await mongoose.startSession();
   try {
-    await session.withTransaction(async () => {
+    return await withOptionalTransaction(async (session) => {
       const { ids } = req.body;
+      
       if (!Array.isArray(ids) || ids.length === 0) {
         return res.status(400).json({
           success: false,
@@ -771,10 +768,10 @@ exports.deleteMany = async (req, res) => {
         });
       }
 
-      // Lấy don_hang_id để reset trạng thái; dùng lean để nhẹ
+      // OPTIMIZATION: Parallel delete + get don_hang_ids
       const phieuSoans = await PhieuSoan.find(
         { _id: { $in: ids } },
-        { don_hang_id: 1 }
+        "don_hang_id"
       )
         .lean()
         .session(session);
@@ -783,16 +780,15 @@ exports.deleteMany = async (req, res) => {
         ...new Set(phieuSoans.map((ps) => String(ps.don_hang_id))),
       ];
 
-      const result = await PhieuSoan.deleteMany({ _id: { $in: ids } }).session(
-        session
-      );
-
-      if (donHangIds.length) {
-        await DonHang.updateMany(
-          { _id: { $in: donHangIds } },
-          { $set: { trang_thai: false } }
-        ).session(session);
-      }
+      const [result] = await Promise.all([
+        PhieuSoan.deleteMany({ _id: { $in: ids } }).session(session),
+        donHangIds.length
+          ? DonHang.updateMany(
+              { _id: { $in: donHangIds } },
+              { $set: { trang_thai: false } }
+            ).session(session)
+          : Promise.resolve(),
+      ]);
 
       return res.status(200).json({
         success: true,
@@ -806,8 +802,6 @@ exports.deleteMany = async (req, res) => {
       message: "Lỗi khi xóa nhiều phiếu soạn",
       error: error.message,
     });
-  } finally {
-    session.endSession();
   }
 };
 
@@ -835,57 +829,66 @@ exports.deleteAll = async (req, res) => {
   }
 };
 
+// ==================== STATISTICS - OPTIMIZED ====================
 exports.getStatistics = async (req, res) => {
   try {
-    // 3 pipeline độc lập để dùng index hiệu quả; có thể gom nếu cần
-    const [byStatus, total, byChanLe, byStore, byLoai] = await Promise.all([
+    // OPTIMIZATION: Single aggregation pipeline thay vì 5 queries riêng
+    const [stats, total] = await Promise.all([
       PhieuSoan.aggregate([
         {
-          $group: {
-            _id: "$trang_thai",
-            count: { $sum: 1 },
-            total_luong: { $sum: "$luong" },
+          $facet: {
+            by_status: [
+              {
+                $group: {
+                  _id: "$trang_thai",
+                  count: { $sum: 1 },
+                  total_luong: { $sum: "$luong" },
+                },
+              },
+            ],
+            by_chan_le: [
+              {
+                $group: {
+                  _id: "$chan_le",
+                  count: { $sum: 1 },
+                  total_luong: { $sum: "$luong" },
+                },
+              },
+            ],
+            by_store: [
+              {
+                $group: {
+                  _id: "$store",
+                  count: { $sum: 1 },
+                  total_luong: { $sum: "$luong" },
+                },
+              },
+            ],
+            by_loai_hang: [
+              {
+                $group: {
+                  _id: "$loai_hang",
+                  count: { $sum: 1 },
+                  total_luong: { $sum: "$luong" },
+                },
+              },
+            ],
           },
         },
       ]),
-      PhieuSoan.countDocuments(),
-      PhieuSoan.aggregate([
-        {
-          $group: {
-            _id: "$chan_le",
-            count: { $sum: 1 },
-            total_luong: { $sum: "$luong" },
-          },
-        },
-      ]),
-      PhieuSoan.aggregate([
-        {
-          $group: {
-            _id: "$store",
-            count: { $sum: 1 },
-            total_luong: { $sum: "$luong" },
-          },
-        },
-      ]),
-      PhieuSoan.aggregate([
-        {
-          $group: {
-            _id: "$loai_hang",
-            count: { $sum: 1 },
-            total_luong: { $sum: "$luong" },
-          },
-        },
-      ]),
+      PhieuSoan.estimatedDocumentCount(), // Faster than countDocuments for total
     ]);
+
+    const result = stats[0] || {};
 
     res.status(200).json({
       success: true,
       data: {
         total,
-        by_status: byStatus,
-        by_chan_le: byChanLe,
-        by_store: byStore,
-        by_loai_hang: byLoai,
+        by_status: result.by_status || [],
+        by_chan_le: result.by_chan_le || [],
+        by_store: result.by_store || [],
+        by_loai_hang: result.by_loai_hang || [],
       },
     });
   } catch (error) {
