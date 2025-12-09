@@ -52,6 +52,7 @@ const phieuSoanRoutes = require("./routes/phieusoan/phieusoan.routes.js");
 const phuXeRoutes = require("./routes/phuxe/phuxe.routes.js");  
 const TbbRoutes = require("./routes/ttb/ttb.routes.js");  
 const ThietBiRoutes = require("./routes/ttb/ttb.routes.js");  
+
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
 app.use("/api/saigoncoop", authRoutes);
