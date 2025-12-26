@@ -2,6 +2,12 @@ const express = require("express");
 const router = express.Router();
 const controller = require("../../controllers/checklistbdh/checklistbdh.controller");
 
+// === ROUTES THEO QUY ĐỊNH (đặt trước để tránh conflict) ===
+router.get("/checklistbdh/quydinh/:loai", controller.getChecklistsByQuyDinh);
+
+// === ROUTES THEO STATUS ===
+router.get("/checklistbdh/status/:status", controller.getChecklistsByStatus);
+
 // Thêm checklist mới
 router.post("/checklistbdh/:formId", controller.createChecklistByFormId);
 
@@ -19,6 +25,14 @@ router.put("/checklistbdh/:id", controller.updateChecklist);
 
 // Xoá checklist theo ID
 router.delete("/checklistbdh/:id", controller.deleteChecklist);
+
+// === ROUTES CHO QUY ĐỊNH CÔNG VIỆC ===
+
+// Cập nhật quy định cho công việc
+router.put(
+  "/checklistbdh/:checklistId/muc/:mucIndex/congviec/:congViecIndex/quydinh",
+  controller.updateQuyDinhCongViec
+);
 
 // === ROUTES CHO CHI TIẾT ===
 

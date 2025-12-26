@@ -1,21 +1,75 @@
 const ChecklistBDHForm = require("../../models/checklistformbdh/checklistformbdh");
 
+// Hàm validate quy_dinh
+const validateQuyDinh = (quy_dinh) => {
+  if (!quy_dinh) return true; // quy_dinh là optional
+
+  const { loai, ngay_trong_tuan, ngay_trong_thang, tan_suat } = quy_dinh;
+
+  // Validate loai
+  if (loai && !["ngày", "tuần", "tháng"].includes(loai)) {
+    return "loai phải là 'ngày', 'tuần', hoặc 'tháng'";
+  }
+
+  // Validate ngay_trong_tuan khi loai = "tuần"
+  if (loai === "tuần" && ngay_trong_tuan) {
+    if (!Array.isArray(ngay_trong_tuan)) {
+      return "ngay_trong_tuan phải là mảng";
+    }
+    if (ngay_trong_tuan.some(n => n < 0 || n > 6)) {
+      return "ngay_trong_tuan phải chứa giá trị từ 0-6 (0=CN, 1=T2, ..., 6=T7)";
+    }
+  }
+
+  // Validate ngay_trong_thang khi loai = "tháng"
+  if (loai === "tháng" && ngay_trong_thang) {
+    if (!Array.isArray(ngay_trong_thang)) {
+      return "ngay_trong_thang phải là mảng";
+    }
+    if (ngay_trong_thang.some(n => n < 1 || n > 31)) {
+      return "ngay_trong_thang phải chứa giá trị từ 1-31";
+    }
+  }
+
+  // Validate tan_suat
+  if (tan_suat && (typeof tan_suat !== "number" || tan_suat < 1)) {
+    return "tan_suat phải là số nguyên dương";
+  }
+
+  return true;
+};
+
+// Hàm validate cấu trúc form
+const validateFormStructure = (cac_muc) => {
+  if (!cac_muc || !Array.isArray(cac_muc)) return true;
+
+  for (const muc of cac_muc) {
+    if (muc.cong_viec && Array.isArray(muc.cong_viec)) {
+      for (const cv of muc.cong_viec) {
+        // Validate chi_tiet
+        if (cv.chi_tiet && !Array.isArray(cv.chi_tiet)) {
+          return "chi_tiet phải là mảng";
+        }
+
+        // Validate quy_dinh
+        const quyDinhValidation = validateQuyDinh(cv.quy_dinh);
+        if (quyDinhValidation !== true) {
+          return quyDinhValidation;
+        }
+      }
+    }
+  }
+
+  return true;
+};
+
 // Tạo form
 exports.createForm = async (req, res) => {
   try {
-    // Validate cấu trúc chi tiết nếu có
-    if (req.body.cac_muc && Array.isArray(req.body.cac_muc)) {
-      for (const muc of req.body.cac_muc) {
-        if (muc.cong_viec && Array.isArray(muc.cong_viec)) {
-          for (const cv of muc.cong_viec) {
-            if (cv.chi_tiet && !Array.isArray(cv.chi_tiet)) {
-              return res.status(400).json({ 
-                error: "chi_tiet phải là mảng" 
-              });
-            }
-          }
-        }
-      }
+    // Validate cấu trúc
+    const validation = validateFormStructure(req.body.cac_muc);
+    if (validation !== true) {
+      return res.status(400).json({ error: validation });
     }
 
     const newForm = new ChecklistBDHForm(req.body);
@@ -65,19 +119,10 @@ exports.deleteForm = async (req, res) => {
 // Cập nhật form theo ID
 exports.updateFormById = async (req, res) => {
   try {
-    // Validate cấu trúc chi tiết nếu có
-    if (req.body.cac_muc && Array.isArray(req.body.cac_muc)) {
-      for (const muc of req.body.cac_muc) {
-        if (muc.cong_viec && Array.isArray(muc.cong_viec)) {
-          for (const cv of muc.cong_viec) {
-            if (cv.chi_tiet && !Array.isArray(cv.chi_tiet)) {
-              return res.status(400).json({ 
-                error: "chi_tiet phải là mảng" 
-              });
-            }
-          }
-        }
-      }
+    // Validate cấu trúc
+    const validation = validateFormStructure(req.body.cac_muc);
+    if (validation !== true) {
+      return res.status(400).json({ error: validation });
     }
 
     const updatedForm = await ChecklistBDHForm.findByIdAndUpdate(
