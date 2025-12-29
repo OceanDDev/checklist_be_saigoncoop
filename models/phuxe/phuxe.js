@@ -5,12 +5,21 @@ const phuXeSchema = new mongoose.Schema(
   {
     khung_gio: { type: String, required: false },
     ten_cua_hang: { type: String, required: false },
+    ma_cua_hang: { type: String, required: false },
     dich_vu: { type: String, required: false },
     ten_tai_xe: { type: String, required: false },
     bien_so_xe: { type: String, required: false },
     ten_phu_xe: { type: String, required: false },
+    
+    // Điều vận xác nhận (khung giờ đi)
+    dieu_van_xac_nhan: { type: String, required: false },
+    thoi_gian_di: { type: Date, required: false }, // Thời gian xác nhận điều vận
+    
+    // Hình ảnh xác nhận (khung giờ xong chuyến)
+    hinh_anh: { type: String, required: false }, // lưu path/URL của ảnh đã upload
+    thoi_gian_xong_chuyen: { type: Date, required: false }, // Thời gian xác nhận hình ảnh
   },
-  { timestamps: true } // thêm createdAt và updatedAt
+  { timestamps: true }
 );
 
 module.exports = mongoose.model("phuXe", phuXeSchema);

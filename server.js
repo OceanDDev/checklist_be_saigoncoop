@@ -2,6 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const cors = require("cors");
+const path = require("path");
 
 dotenv.config();
 const app = express();
@@ -24,6 +25,10 @@ app.use(cors({
 // ✅ Middleware xử lý JSON & form - THÊM LIMIT Ở ĐÂY
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// 🆕 Serve static files từ thư mục uploads
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+console.log("📁 Static files served from:", path.join(__dirname, 'uploads'));
 
 // ✅ (Optional) Middleware log request size để debug
 app.use((req, res, next) => {
@@ -71,10 +76,8 @@ app.use("/api/saigoncoop", phuXeRoutes);
 app.use("/api/saigoncoop", TbbRoutes);
 app.use("/api/saigoncoop", ThietBiRoutes);
 
-
-
 // ✅ Kết nối MongoDB
- mongoose
+mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {
     console.log("✅ Connected to MongoDB");
