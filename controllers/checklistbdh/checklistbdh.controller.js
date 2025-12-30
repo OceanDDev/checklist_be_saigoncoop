@@ -4,11 +4,23 @@ const ChecklistBDH = require("../../models/checklistbdh/checklistbdh");
 const validateAndNormalizeQuyDinh = (quy_dinh) => {
   if (!quy_dinh) return null;
 
-  const { loai, ngay_trong_tuan, ngay_trong_thang, tan_suat } = quy_dinh;
+  const { loai, ngay_trong_tuan, ngay_trong_thang, tan_suat, phat_sinh } =
+    quy_dinh;
 
   // Validate loai
-  if (!loai || !["ngày", "tuần", "tháng"].includes(loai)) {
-    throw new Error("quy_dinh.loai phải là: ngày, tuần, hoặc tháng");
+  if (!loai || !["ngày", "tuần", "tháng", "phát sinh"].includes(loai)) {
+    throw new Error("quy_dinh.loai phải là: ngày, tuần, tháng, hoặc phát sinh");
+  }
+
+  // ✅ Nếu là phát sinh, không cần validate các trường khác
+  if (loai === "phát sinh" || phat_sinh === true) {
+    return {
+      loai: "phát sinh",
+      ngay_trong_tuan: null,
+      ngay_trong_thang: null,
+      tan_suat: tan_suat || 1,
+      phat_sinh: true,
+    };
   }
 
   // ✅ Chuẩn hóa dựa trên loại được chọn
@@ -16,7 +28,8 @@ const validateAndNormalizeQuyDinh = (quy_dinh) => {
     loai,
     ngay_trong_tuan: null,
     ngay_trong_thang: null,
-    tan_suat: tan_suat || 1
+    tan_suat: tan_suat || 1,
+    phat_sinh: phat_sinh || false,
   };
 
   // Chỉ giữ trường tương ứng với loại
@@ -24,7 +37,10 @@ const validateAndNormalizeQuyDinh = (quy_dinh) => {
     if (!ngay_trong_tuan || !Array.isArray(ngay_trong_tuan)) {
       throw new Error("ngay_trong_tuan phải là mảng khi loai là 'tuần'");
     }
-    if (ngay_trong_tuan.some(n => n < 0 || n > 6)) {
+    if (ngay_trong_tuan.length === 0) {
+      throw new Error("ngay_trong_tuan không được rỗng");
+    }
+    if (ngay_trong_tuan.some((n) => n < 0 || n > 6)) {
       throw new Error("ngay_trong_tuan phải chứa số từ 0 (CN) đến 6 (T7)");
     }
     normalized.ngay_trong_tuan = ngay_trong_tuan;
@@ -32,7 +48,10 @@ const validateAndNormalizeQuyDinh = (quy_dinh) => {
     if (!ngay_trong_thang || !Array.isArray(ngay_trong_thang)) {
       throw new Error("ngay_trong_thang phải là mảng khi loai là 'tháng'");
     }
-    if (ngay_trong_thang.some(n => n < 1 || n > 31)) {
+    if (ngay_trong_thang.length === 0) {
+      throw new Error("ngay_trong_thang không được rỗng");
+    }
+    if (ngay_trong_thang.some((n) => n < 1 || n > 31)) {
       throw new Error("ngay_trong_thang phải chứa số từ 1 đến 31");
     }
     normalized.ngay_trong_thang = ngay_trong_thang;
@@ -55,7 +74,7 @@ const validateCacMuc = (cac_muc) => {
         if (cv.chi_tiet && !Array.isArray(cv.chi_tiet)) {
           throw new Error("chi_tiet phải là mảng");
         }
-        
+
         // ✅ Validate và chuẩn hóa quy_dinh
         if (cv.quy_dinh) {
           cv.quy_dinh = validateAndNormalizeQuyDinh(cv.quy_dinh);
@@ -73,7 +92,7 @@ const validateCongViecKhac = (cong_viec_khac) => {
     if (cv.chi_tiet && !Array.isArray(cv.chi_tiet)) {
       throw new Error("chi_tiet trong cong_viec_khac phải là mảng");
     }
-    
+
     // ✅ Validate và chuẩn hóa quy_dinh
     if (cv.quy_dinh) {
       cv.quy_dinh = validateAndNormalizeQuyDinh(cv.quy_dinh);
@@ -96,9 +115,19 @@ exports.createChecklistByFormId = async (req, res) => {
     } = req.body;
 
     // Validate status nếu có
-    if (status && !["Đi làm","Nghỉ ca", "Nghỉ bù", "Nghỉ phép", "Nghỉ không lương"].includes(status)) {
-      return res.status(400).json({ 
-        error: "status phải là một trong: Đi làm, Nghỉ ca, Nghỉ bù, Nghỉ phép, Nghỉ không lương" 
+    if (
+      status &&
+      ![
+        "Đi làm",
+        "Nghỉ ca",
+        "Nghỉ bù",
+        "Nghỉ phép",
+        "Nghỉ không lương",
+      ].includes(status)
+    ) {
+      return res.status(400).json({
+        error:
+          "status phải là một trong: Đi làm, Nghỉ ca, Nghỉ bù, Nghỉ phép, Nghỉ không lương",
       });
     }
 
@@ -142,7 +171,9 @@ exports.getAllChecklists = async (req, res) => {
 // Lấy checklist theo ID
 exports.getChecklistById = async (req, res) => {
   try {
-    const checklist = await ChecklistBDH.findById(req.params.id).populate("form_id");
+    const checklist = await ChecklistBDH.findById(req.params.id).populate(
+      "form_id"
+    );
     if (!checklist) {
       return res.status(404).json({ message: "Checklist not found" });
     }
@@ -156,12 +187,22 @@ exports.getChecklistById = async (req, res) => {
 exports.updateChecklist = async (req, res) => {
   try {
     // Validate status nếu có trong body
-    if (req.body.status && !["Đi làm","Nghỉ ca", "Nghỉ bù", "Nghỉ phép", "Nghỉ không lương"].includes(req.body.status)) {
-      return res.status(400).json({ 
-        error: "status phải là một trong: Đi làm, Nghỉ ca, Nghỉ bù, Nghỉ phép, Nghỉ không lương" 
+    if (
+      req.body.status &&
+      ![
+        "Đi làm",
+        "Nghỉ ca",
+        "Nghỉ bù",
+        "Nghỉ phép",
+        "Nghỉ không lương",
+      ].includes(req.body.status)
+    ) {
+      return res.status(400).json({
+        error:
+          "status phải là một trong: Đi làm, Nghỉ ca, Nghỉ bù, Nghỉ phép, Nghỉ không lương",
       });
     }
-    
+
     // ✅ Validate và chuẩn hóa cac_muc nếu có
     try {
       if (req.body.cac_muc) {
@@ -209,7 +250,9 @@ exports.deleteChecklist = async (req, res) => {
 exports.getCheckListsByFormIdBDH = async (req, res) => {
   try {
     const { formId } = req.params;
-    const checklists = await ChecklistBDH.find({ form_id: formId }).populate("form_id");
+    const checklists = await ChecklistBDH.find({ form_id: formId }).populate(
+      "form_id"
+    );
     res.json(checklists);
   } catch (error) {
     console.error("Lỗi khi lấy checklist theo form:", error);
@@ -221,10 +264,18 @@ exports.getCheckListsByFormIdBDH = async (req, res) => {
 exports.getChecklistsByStatus = async (req, res) => {
   try {
     const { status } = req.params;
-    
-    if (!["Đi làm","Nghỉ ca", "Nghỉ bù", "Nghỉ phép", "Nghỉ không lương"].includes(status)) {
-      return res.status(400).json({ 
-        error: "status không hợp lệ" 
+
+    if (
+      ![
+        "Đi làm",
+        "Nghỉ ca",
+        "Nghỉ bù",
+        "Nghỉ phép",
+        "Nghỉ không lương",
+      ].includes(status)
+    ) {
+      return res.status(400).json({
+        error: "status không hợp lệ",
       });
     }
 
@@ -236,39 +287,48 @@ exports.getChecklistsByStatus = async (req, res) => {
   }
 };
 
-// ✅ Lấy checklist theo quy định (ngày/tuần/tháng)
+// ✅ Lấy checklist theo quy định (ngày/tuần/tháng/phát sinh)
 exports.getChecklistsByQuyDinh = async (req, res) => {
   try {
     const { loai } = req.params;
     const { ngay } = req.query;
-    
-    if (!["ngày", "tuần", "tháng"].includes(loai)) {
-      return res.status(400).json({ 
-        error: "loai phải là: ngày, tuần, hoặc tháng" 
+
+    if (!["ngày", "tuần", "tháng", "phát sinh"].includes(loai)) {
+      return res.status(400).json({
+        error: "loai phải là: ngày, tuần, tháng, hoặc phát sinh",
       });
     }
 
     const checklists = await ChecklistBDH.find().populate("form_id");
-    
-    const filteredChecklists = checklists.filter(checklist => {
-      return checklist.cac_muc.some(muc => {
-        return muc.cong_viec.some(cv => {
-          if (!cv.quy_dinh || cv.quy_dinh.loai !== loai) return false;
-          
+
+    const filteredChecklists = checklists.filter((checklist) => {
+      return checklist.cac_muc.some((muc) => {
+        return muc.cong_viec.some((cv) => {
+          if (!cv.quy_dinh) return false;
+
+          // ✅ Xử lý phát sinh
+          if (loai === "phát sinh") {
+            return (
+              cv.quy_dinh.loai === "phát sinh" || cv.quy_dinh.phat_sinh === true
+            );
+          }
+
+          if (cv.quy_dinh.loai !== loai) return false;
+
           if (loai === "ngày") return true;
-          
+
           if (loai === "tuần" && ngay) {
             const date = new Date(ngay);
             const dayOfWeek = date.getDay();
             return cv.quy_dinh.ngay_trong_tuan?.includes(dayOfWeek);
           }
-          
+
           if (loai === "tháng" && ngay) {
             const date = new Date(ngay);
             const dayOfMonth = date.getDate();
             return cv.quy_dinh.ngay_trong_thang?.includes(dayOfMonth);
           }
-          
+
           return false;
         });
       });
@@ -277,6 +337,40 @@ exports.getChecklistsByQuyDinh = async (req, res) => {
     res.json(filteredChecklists);
   } catch (error) {
     console.error("Lỗi khi lấy checklist theo quy định:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+// ✅ Lấy tất cả công việc phát sinh
+exports.getPhatSinhChecklists = async (req, res) => {
+  try {
+    const checklists = await ChecklistBDH.find().populate("form_id");
+
+    const filteredChecklists = checklists.filter((checklist) => {
+      // Kiểm tra trong cac_muc
+      const hasPhatSinhInMuc = checklist.cac_muc.some((muc) => {
+        return muc.cong_viec.some((cv) => {
+          return (
+            cv.quy_dinh &&
+            (cv.quy_dinh.loai === "phát sinh" || cv.quy_dinh.phat_sinh === true)
+          );
+        });
+      });
+
+      // Kiểm tra trong cong_viec_khac
+      const hasPhatSinhInKhac = checklist.cong_viec_khac?.some((cv) => {
+        return (
+          cv.quy_dinh &&
+          (cv.quy_dinh.loai === "phát sinh" || cv.quy_dinh.phat_sinh === true)
+        );
+      });
+
+      return hasPhatSinhInMuc || hasPhatSinhInKhac;
+    });
+
+    res.json(filteredChecklists);
+  } catch (error) {
+    console.error("Lỗi khi lấy checklist phát sinh:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -299,7 +393,7 @@ exports.addChiTietToCongViec = async (req, res) => {
 
     congViec.chi_tiet.push({
       noi_dung_chi_tiet,
-      da_chon: false
+      da_chon: false,
     });
 
     await checklist.save();
@@ -353,7 +447,10 @@ exports.updateChiTietStatus = async (req, res) => {
       return res.status(404).json({ message: "Checklist not found" });
     }
 
-    const chiTiet = checklist.cac_muc[mucIndex].cong_viec[congViecIndex].chi_tiet[chiTietIndex];
+    const chiTiet =
+      checklist.cac_muc[mucIndex].cong_viec[congViecIndex].chi_tiet[
+        chiTietIndex
+      ];
     if (!chiTiet) {
       return res.status(404).json({ message: "Chi tiết not found" });
     }

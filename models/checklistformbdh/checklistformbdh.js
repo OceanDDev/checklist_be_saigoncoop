@@ -8,11 +8,10 @@ const congViecFormSchema = new mongoose.Schema({
   noidung: { type: String, required: true },
   chi_tiet: [chiTietFormSchema],
   
-  // ✅ Thêm trường quy_dinh
   quy_dinh: {
     loai: {
       type: String,
-      enum: ["ngày", "tuần", "tháng"],
+      enum: ["ngày", "tuần", "tháng", "phát sinh"], // ✅ Thêm "phát sinh" vào enum
       default: "ngày"
     },
     // Nếu loại = "tuần", chỉ định các ngày trong tuần
@@ -29,6 +28,11 @@ const congViecFormSchema = new mongoose.Schema({
     tan_suat: {
       type: Number,
       default: 1
+    },
+    // ✅ Thêm trường phát sinh
+    phat_sinh: {
+      type: Boolean,
+      default: false
     }
   }
 });

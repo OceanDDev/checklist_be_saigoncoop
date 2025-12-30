@@ -11,11 +11,11 @@ const congViecSchema = new mongoose.Schema({
   da_chon: { type: Boolean, default: false },
   so_lan: { type: Number, default: 0 },
   
-  // ✅ Trường mới: Quy định checklist
+  // ✅ Trường quy định checklist - CÓ PHÁT SINH
   quy_dinh: {
     loai: {
       type: String,
-      enum: ["ngày", "tuần", "tháng"],
+      enum: ["ngày", "tuần", "tháng", "phát sinh"], // ✅ Thêm "phát sinh"
       default: "ngày"
     },
     // Nếu loại = "tuần", chỉ định các ngày trong tuần
@@ -32,6 +32,11 @@ const congViecSchema = new mongoose.Schema({
     tan_suat: {
       type: Number, // VD: mỗi 2 ngày, mỗi 3 tuần
       default: 1
+    },
+    // ✅ Trường đánh dấu phát sinh
+    phat_sinh: {
+      type: Boolean,
+      default: false
     }
   }
 });
