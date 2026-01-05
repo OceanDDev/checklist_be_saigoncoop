@@ -14,11 +14,11 @@ const toStr = (v, def = "") => (typeof v === "string" ? v : def);
 /** Chuẩn hoá 1 item KPI theo schema hiện tại */
 const normalizeCheckItem = (it = {}) => {
   const tyTrong = toNum(it.ty_trong);
-  
+
   return {
     kpi: toStr(it.kpi),
     ty_trong: tyTrong,
-    ty_trong_cuoi: toNum(it.ty_trong_cuoi, tyTrong), // Dùng tyTrong làm giá trị mặc định
+    ty_trong_cuoi: toNum(it.ty_trong_cuoi, tyTrong),
 
     so_loi: toNum(it.so_loi),
     noi_dung_loi: toStr(it.noi_dung_loi),
@@ -26,7 +26,6 @@ const normalizeCheckItem = (it = {}) => {
     ky_hieu: toStr(it.ky_hieu),
     don_vi_tinh: toStr(it.don_vi_tinh),
 
-    // các field mới bổ sung (đều là string theo schema)
     da_thuc_hien: toStr(it.da_thuc_hien),
     ke_hoach_quy: toStr(it.ke_hoach_quy),
     chu_ki: toStr(it.chu_ki),
@@ -35,11 +34,8 @@ const normalizeCheckItem = (it = {}) => {
     bp_theo_doi: toStr(it.bp_theo_doi),
   };
 };
-/** Xây danh_sach_check từ:
- *  - danh_sach_check payload (ưu tiên)
- *  - kpis payload (map sang field mới)
- *  - formKPI.kpis (mặc định)
- */
+
+/** Xây danh_sach_check từ các nguồn */
 const buildChecklistFromSources = (payload = {}, formKPI) => {
   const { danh_sach_check, kpis } = payload;
 
@@ -69,7 +65,6 @@ const buildChecklistFromSources = (payload = {}, formKPI) => {
     );
   }
 
-  // fallback từ formKPI.kpis
   return (formKPI?.kpis || []).map((k) =>
     normalizeCheckItem({
       kpi: k.kpi,
@@ -82,7 +77,7 @@ const buildChecklistFromSources = (payload = {}, formKPI) => {
   );
 };
 
-/** Lấy actor từ req (ưu tiên middleware auth) */
+/** Lấy actor từ req */
 const extractActor = (req) => {
   const nameFromAuth = req.user && (req.user.name || req.user.fullName);
   const idFromAuth = req.user && (req.user.id || req.user._id);
@@ -105,10 +100,10 @@ exports.createCheckKPI = async (req, res) => {
   try {
     const {
       form_kpi_id,
-      thang,
+      quy,
       nam,
       ghi_chu,
-      ty_trong_thang,
+      ty_trong_quy,
       danh_sach_check,
       kpis,
     } = req.body;
@@ -118,6 +113,7 @@ exports.createCheckKPI = async (req, res) => {
         .status(400)
         .json({ success: false, message: "Thiếu form_kpi_id" });
     }
+
     const formKPI = await FormKPIStaff.findById(form_kpi_id);
     if (!formKPI) {
       return res
@@ -127,13 +123,13 @@ exports.createCheckKPI = async (req, res) => {
 
     const existing = await CheckKPIStaff.findOne({
       form_kpi_id,
-      thang: toNum(thang),
+      quy: toNum(quy),
       nam: toNum(nam),
     });
     if (existing) {
       return res.status(400).json({
         success: false,
-        message: "Đã có check KPI cho form này trong tháng/năm",
+        message: "Đã có check KPI cho form này trong quý/năm",
       });
     }
 
@@ -145,9 +141,9 @@ exports.createCheckKPI = async (req, res) => {
       ho_ten: formKPI.ho_ten,
       don_vi: formKPI.don_vi,
       chuc_danh: formKPI.chuc_danh,
-      thang: toNum(thang),
+      quy: toNum(quy),
       nam: toNum(nam),
-      ty_trong_thang: toNum(ty_trong_thang, 100),
+      ty_trong_quy: toNum(ty_trong_quy, 100),
       danh_sach_check: list,
       ghi_chu: toStr(ghi_chu),
     });
@@ -157,29 +153,25 @@ exports.createCheckKPI = async (req, res) => {
       .status(201)
       .json({ success: true, message: "Tạo check KPI thành công", data: doc });
   } catch (error) {
-    // Bắt duplicate key (unique index)
     if (error?.code === 11000) {
       return res.status(409).json({
         success: false,
         message:
-          "Bản ghi check KPI đã tồn tại (form_kpi_id + thang + nam là duy nhất)",
+          "Bản ghi check KPI đã tồn tại (form_kpi_id + quy + nam là duy nhất)",
       });
     }
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Lỗi tạo check KPI",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Lỗi tạo check KPI",
+      error: error.message,
+    });
   }
 };
 
-/** Tạo check KPI từ mã nhân viên (không cần form_kpi_id) */
+/** Tạo check KPI từ mã nhân viên */
 exports.createCheckKPIFromStaff = async (req, res) => {
   try {
-    const { ma_nhan_vien, thang, nam, ghi_chu, ty_trong_thang, kpis } =
-      req.body;
+    const { ma_nhan_vien, quy, nam, ghi_chu, ty_trong_quy, kpis } = req.body;
 
     if (!ma_nhan_vien) {
       return res
@@ -189,25 +181,25 @@ exports.createCheckKPIFromStaff = async (req, res) => {
 
     const formKPI = await FormKPIStaff.findOne({
       ma_nhan_vien,
-      thang: toNum(thang),
+      quy: toNum(quy),
       nam: toNum(nam),
     });
     if (!formKPI) {
       return res.status(404).json({
         success: false,
-        message: "Không tìm thấy form KPI cho nhân viên này trong tháng/năm",
+        message: "Không tìm thấy form KPI cho nhân viên này trong quý/năm",
       });
     }
 
     const dup = await CheckKPIStaff.findOne({
       form_kpi_id: formKPI._id,
-      thang: toNum(thang),
+      quy: toNum(quy),
       nam: toNum(nam),
     });
     if (dup) {
       return res.status(400).json({
         success: false,
-        message: "Đã có check KPI cho nhân viên này trong tháng/năm",
+        message: "Đã có check KPI cho nhân viên này trong quý/năm",
       });
     }
 
@@ -219,9 +211,9 @@ exports.createCheckKPIFromStaff = async (req, res) => {
       ho_ten: formKPI.ho_ten,
       don_vi: formKPI.don_vi,
       chuc_danh: formKPI.chuc_danh,
-      thang: toNum(thang),
+      quy: toNum(quy),
       nam: toNum(nam),
-      ty_trong_thang: toNum(ty_trong_thang, 100),
+      ty_trong_quy: toNum(ty_trong_quy, 100),
       danh_sach_check: list,
       ghi_chu: toStr(ghi_chu),
     });
@@ -237,7 +229,7 @@ exports.createCheckKPIFromStaff = async (req, res) => {
       return res.status(409).json({
         success: false,
         message:
-          "Bản ghi check KPI đã tồn tại (form_kpi_id + thang + nam là duy nhất)",
+          "Bản ghi check KPI đã tồn tại (form_kpi_id + quy + nam là duy nhất)",
       });
     }
     res.status(500).json({
@@ -248,11 +240,10 @@ exports.createCheckKPIFromStaff = async (req, res) => {
   }
 };
 
-/** Cập nhật check KPI + log (ghi snapshot trước & sau) */
-// controllers/checkkpistaff.controller.js
+/** Cập nhật check KPI + log */
 exports.updateCheckKPI = async (req, res) => {
   try {
-    const { danh_sach_check, ghi_chu, update_note, ty_trong_thang } = req.body;
+    const { danh_sach_check, ghi_chu, update_note, ty_trong_quy } = req.body;
 
     const doc = await CheckKPIStaff.findById(req.params.id);
     if (!doc) {
@@ -261,14 +252,14 @@ exports.updateCheckKPI = async (req, res) => {
         .json({ success: false, message: "Không tìm thấy check KPI" });
     }
 
-    // ---- snapshot trước khi cập nhật (deep clone) ----
+    // Snapshot trước khi cập nhật
     const snapshotBefore = {
       danh_sach_check: JSON.parse(JSON.stringify(doc.danh_sach_check || [])),
       ghi_chu: doc.ghi_chu ?? "",
-      ty_trong_thang: doc.ty_trong_thang ?? 0,
+      ty_trong_quy: doc.ty_trong_quy ?? 0,
     };
 
-    // ---- cập nhật dữ liệu ----
+    // Cập nhật dữ liệu
     if (Array.isArray(danh_sach_check)) {
       doc.danh_sach_check = danh_sach_check.map(normalizeCheckItem);
       doc.markModified("danh_sach_check");
@@ -276,11 +267,11 @@ exports.updateCheckKPI = async (req, res) => {
     if (typeof ghi_chu === "string") {
       doc.ghi_chu = ghi_chu;
     }
-    if (typeof ty_trong_thang !== "undefined") {
-      doc.ty_trong_thang = toNum(ty_trong_thang, doc.ty_trong_thang);
+    if (typeof ty_trong_quy !== "undefined") {
+      doc.ty_trong_quy = toNum(ty_trong_quy, doc.ty_trong_quy);
     }
 
-    // ---- actor & log ----
+    // Actor & log
     const { by_name, by_id } = extractActor(req);
     doc.updates = doc.updates || [];
     doc.so_lan_update = (doc.so_lan_update || 0) + 1;
@@ -288,7 +279,7 @@ exports.updateCheckKPI = async (req, res) => {
     const snapshotAfter = {
       danh_sach_check: JSON.parse(JSON.stringify(doc.danh_sach_check || [])),
       ghi_chu: doc.ghi_chu ?? "",
-      ty_trong_thang: doc.ty_trong_thang ?? 0,
+      ty_trong_quy: doc.ty_trong_quy ?? 0,
     };
 
     doc.updates.push({
@@ -296,8 +287,8 @@ exports.updateCheckKPI = async (req, res) => {
       by_id,
       note: toStr(update_note),
       at: new Date(),
-      snapshot_before: snapshotBefore,  // <--- LƯU ẢNH TRƯỚC
-      snapshot: snapshotAfter,          // <--- ẢNH SAU
+      snapshot_before: snapshotBefore,
+      snapshot: snapshotAfter,
     });
     doc.markModified("updates");
 
@@ -317,14 +308,13 @@ exports.updateCheckKPI = async (req, res) => {
   }
 };
 
-
-/** Lấy tất cả check KPI (có filter cơ bản) */
+/** Lấy tất cả check KPI */
 exports.getAllCheckKPI = async (req, res) => {
   try {
-    const { thang, nam, ma_nhan_vien, don_vi } = req.query;
+    const { quy, nam, ma_nhan_vien, don_vi } = req.query;
 
     const filter = {};
-    if (thang) filter.thang = toNum(thang);
+    if (quy) filter.quy = toNum(quy);
     if (nam) filter.nam = toNum(nam);
     if (ma_nhan_vien)
       filter.ma_nhan_vien = { $regex: ma_nhan_vien, $options: "i" };
@@ -362,7 +352,7 @@ exports.getCheckKPIById = async (req, res) => {
       message: "Lỗi lấy thông tin check KPI",
       error: error.message,
     });
-  } 
+  }
 };
 
 /** Lấy check KPI theo nhân viên và năm */
@@ -375,7 +365,7 @@ exports.getCheckKPIByStaff = async (req, res) => {
       nam: toNum(nam),
     })
       .populate("form_kpi_id")
-      .sort({ thang: 1 });
+      .sort({ quy: 1 });
 
     if (!list || list.length === 0) {
       return res.status(404).json({
@@ -385,12 +375,12 @@ exports.getCheckKPIByStaff = async (req, res) => {
     }
 
     const stats = {
-      totalMonths: list.length,
-      months: list.map((k) => k.thang).sort((a, b) => a - b),
+      totalQuarters: list.length,
+      quarters: list.map((k) => k.quy).sort((a, b) => a - b),
       averageWeight:
         list.length > 0
           ? Math.round(
-              (list.reduce((s, k) => s + (Number(k.ty_trong_thang) || 0), 0) /
+              (list.reduce((s, k) => s + (Number(k.ty_trong_quy) || 0), 0) /
                 list.length) *
                 100
             ) / 100
@@ -434,9 +424,9 @@ exports.deleteCheckKPI = async (req, res) => {
 /** Thống kê check KPI */
 exports.getCheckKPIStats = async (req, res) => {
   try {
-    const { thang, nam } = req.query;
+    const { quy, nam } = req.query;
     const filter = {};
-    if (thang) filter.thang = toNum(thang);
+    if (quy) filter.quy = toNum(quy);
     if (nam) filter.nam = toNum(nam);
 
     const stats = await CheckKPIStaff.aggregate([

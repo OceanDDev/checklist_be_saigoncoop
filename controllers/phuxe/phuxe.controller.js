@@ -3,13 +3,21 @@ const PhuXe = require("../../models/phuxe/phuxe");
 const PhuXeName = require("../../models/phuxe/tenphuxe");
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 const CuaHang = require("../../models/dieuvan/cuahang/cuahang");
 const Chbx = require("../../models/phuxe/chbx");
+
+// ✅ Tạo thư mục uploads nếu chưa có
+const uploadsDir = path.join(__dirname, "../../uploads/phuxe");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log("✅ Created uploads directory:", uploadsDir);
+}
 
 // 📸 Cấu hình multer để upload hình ảnh
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, "uploads/phuxe/"); // thư mục lưu ảnh
+    cb(null, uploadsDir); // Dùng đường dẫn tuyệt đối
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -18,7 +26,6 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  // Chỉ cho phép file ảnh
   if (file.mimetype.startsWith("image/")) {
     cb(null, true);
   } else {
@@ -29,36 +36,39 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 }, // giới hạn 5MB
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
-// Export middleware upload để dùng trong route
+// Export middleware upload
 exports.uploadImage = upload.single("hinh_anh");
-exports.uploadImages = upload.array("images", 10); // 🆕 Upload nhiều ảnh
+exports.uploadImages = upload.array("images", 10);
 
-// 📦 Lấy danh sách tất cả phụ xe (có ngày import)
+// 🔧 Helper function: Tạo URL đầy đủ
+const getFullImageUrl = (req, filename) => {
+  const protocol = req.protocol; // http hoặc https
+  const host = req.get("host"); // localhost:5000 hoặc bes1.khovanscl.io.vn
+  return `${protocol}://${host}/uploads/phuxe/${filename}`;
+};
+
+// 📦 Lấy danh sách tất cả phụ xe
 exports.getAllPhuXe = async (req, res) => {
   try {
     const list = await PhuXe.find().sort({ createdAt: -1 });
 
-    // 🆕 Map lại tên cửa hàng
     const listWithNames = await Promise.all(
       list.map(async (item) => {
         const itemObj = item.toObject();
 
-        // Nếu ten_cua_hang trống hoặc giống ma_cua_hang (chưa map)
         if (
           !itemObj.ten_cua_hang ||
           itemObj.ten_cua_hang === itemObj.ma_cua_hang
         ) {
           if (itemObj.ma_cua_hang) {
             try {
-              // ✅ Sửa: Dùng maCH thay vì ma_cua_hang
               const cuaHang = await CuaHang.findOne({
                 maCH: itemObj.ma_cua_hang,
               });
               if (cuaHang) {
-                // ✅ Sửa: Dùng tenCH thay vì ten_cua_hang
                 itemObj.ten_cua_hang = cuaHang.tenCH;
               }
             } catch (error) {
@@ -95,10 +105,11 @@ exports.addPhuXe = async (req, res) => {
   try {
     const phuXeData = req.body;
 
-    // Nếu có upload file ảnh
+    // ✅ Nếu có upload file ảnh - LƯU URL ĐẦY ĐỦ
     if (req.file) {
-      phuXeData.hinh_anh = `/uploads/phuxe/${req.file.filename}`;
-      phuXeData.thoi_gian_xong_chuyen = new Date(); // 🆕 Lưu thời gian upload ảnh
+      phuXeData.hinh_anh = getFullImageUrl(req, req.file.filename);
+      phuXeData.thoi_gian_xong_chuyen = new Date();
+      console.log("📸 Image saved:", phuXeData.hinh_anh);
     }
 
     const newPhuXe = new PhuXe(phuXeData);
@@ -125,7 +136,6 @@ exports.addManyPhuXe = async (req, res) => {
         .json({ message: "Dữ liệu không hợp lệ hoặc rỗng" });
     }
 
-    // Lọc bỏ các bản ghi hoàn toàn rỗng
     data = data.filter(
       (item) =>
         item.khung_gio ||
@@ -135,7 +145,8 @@ exports.addManyPhuXe = async (req, res) => {
         item.ten_tai_xe ||
         item.bien_so_xe ||
         item.ten_phu_xe ||
-        item.dieu_van_xac_nhan
+        item.dieu_van_xac_nhan ||
+        item.ghi_chu
     );
 
     if (data.length === 0) {
@@ -154,7 +165,7 @@ exports.addManyPhuXe = async (req, res) => {
   }
 };
 
-// 🆕 API xác nhận điều vận (khung giờ đi)
+// 🆕 API xác nhận điều vận
 exports.xacNhanDieuVan = async (req, res) => {
   try {
     const { id } = req.params;
@@ -164,7 +175,7 @@ exports.xacNhanDieuVan = async (req, res) => {
       id,
       {
         dieu_van_xac_nhan,
-        thoi_gian_di: new Date(), // 🆕 Lưu thời gian xác nhận điều vận (giờ đi)
+        thoi_gian_di: new Date(),
       },
       { new: true }
     );
@@ -188,31 +199,37 @@ exports.updatePhuXe = async (req, res) => {
   try {
     const updateData = req.body;
 
-    // 🆕 Nếu có cập nhật điều vận xác nhận
+    // Nếu có cập nhật điều vận xác nhận
     if (updateData.dieu_van_xac_nhan) {
-      updateData.thoi_gian_di = new Date(); // Lưu thời gian xác nhận điều vận
+      updateData.thoi_gian_di = new Date();
     }
 
-    // Nếu có upload file ảnh mới (single)
+    // ✅ Nếu có upload file ảnh mới (single) - LƯU URL ĐẦY ĐỦ
     if (req.file) {
-      updateData.hinh_anh = `/uploads/phuxe/${req.file.filename}`;
-      updateData.thoi_gian_xong_chuyen = new Date(); // Lưu thời gian xác nhận hình ảnh
+      updateData.hinh_anh = getFullImageUrl(req, req.file.filename);
+      updateData.thoi_gian_xong_chuyen = new Date();
+      console.log("📸 Single image URL:", updateData.hinh_anh);
+      console.log("📁 File path on disk:", req.file.path);
     }
 
-    // Nếu có upload nhiều ảnh (multiple)
+    // ✅ Nếu có upload nhiều ảnh (multiple) - LƯU URL ĐẦY ĐỦ
     if (req.files && req.files.length > 0) {
-      const imageUrls = req.files.map(
-        (file) => `/uploads/phuxe/${file.filename}`
+      const imageUrls = req.files.map((file) =>
+        getFullImageUrl(req, file.filename)
       );
 
-      // Lưu ảnh đầu tiên
       updateData.hinh_anh = imageUrls[0];
-      updateData.thoi_gian_xong_chuyen = new Date(); // Lưu thời gian xác nhận hình ảnh
+      updateData.thoi_gian_xong_chuyen = new Date();
+
+      console.log("📸 Multiple images URLs:", imageUrls);
+      console.log("📁 Files saved to disk:");
+      req.files.forEach((file) => console.log("  -", file.path));
     } else if (!req.file) {
       console.log("⚠️ No files received!");
     }
+
     const updated = await PhuXe.findByIdAndUpdate(req.params.id, updateData, {
-      new: true, // Trả về document sau khi update
+      new: true,
     });
 
     if (!updated) {
@@ -221,7 +238,7 @@ exports.updatePhuXe = async (req, res) => {
         .json({ message: "Không tìm thấy phụ xe để cập nhật" });
     }
 
-    console.log("✅ Updated document:", updated);
+    console.log("✅ Updated document - hinh_anh:", updated.hinh_anh);
     res.status(200).json(updated);
   } catch (error) {
     console.error("❌ Error updating phu xe:", error);
@@ -241,8 +258,11 @@ exports.deletePhuXe = async (req, res) => {
 
     // TODO: Xóa file ảnh nếu có
     // if (deleted.hinh_anh) {
-    //   const fs = require('fs');
-    //   fs.unlinkSync('./uploads/phuxe/' + path.basename(deleted.hinh_anh));
+    //   const filename = path.basename(deleted.hinh_anh);
+    //   const filePath = path.join(uploadsDir, filename);
+    //   if (fs.existsSync(filePath)) {
+    //     fs.unlinkSync(filePath);
+    //   }
     // }
 
     res.status(200).json({ message: "Đã xóa phụ xe thành công" });
@@ -300,6 +320,8 @@ exports.deletePhuXeName = async (req, res) => {
   }
 };
 
+// === STORE MANAGEMENT ===
+
 exports.getAllStores = async (req, res) => {
   try {
     const stores = await Chbx.find().sort({ createdAt: -1 });
@@ -312,7 +334,6 @@ exports.getAllStores = async (req, res) => {
   }
 };
 
-// 2. Lấy chi tiết một cửa hàng theo ID
 exports.getStoreById = async (req, res) => {
   try {
     const store = await Chbx.findById(req.params.id);
@@ -324,12 +345,10 @@ exports.getStoreById = async (req, res) => {
   }
 };
 
-// 3. Tạo mới một cửa hàng
 exports.createStore = async (req, res) => {
   try {
     const { ma_cua_hang, ten_cua_hang } = req.body;
 
-    // ✅ Kiểm tra trùng mã trước khi thêm
     const existed = await Chbx.findOne({ ma_cua_hang });
     if (existed) {
       return res.status(400).json({
@@ -337,15 +356,10 @@ exports.createStore = async (req, res) => {
       });
     }
 
-    const newStore = new Chbx({
-      ma_cua_hang,
-      ten_cua_hang,
-    });
-
+    const newStore = new Chbx({ ma_cua_hang, ten_cua_hang });
     const savedStore = await newStore.save();
     res.status(201).json(savedStore);
   } catch (error) {
-    // ✅ Bắt lỗi duplicate key từ MongoDB
     if (error.code === 11000) {
       return res.status(400).json({
         message: `Mã cửa hàng ${req.body.ma_cua_hang} đã tồn tại!`,
@@ -358,13 +372,12 @@ exports.createStore = async (req, res) => {
   }
 };
 
-// 4. Cập nhật thông tin cửa hàng
 exports.updateStore = async (req, res) => {
   try {
     const updatedStore = await Chbx.findByIdAndUpdate(
       req.params.id,
       { $set: req.body },
-      { new: true, runValidators: true } // new: true để trả về dữ liệu sau khi update
+      { new: true, runValidators: true }
     );
 
     if (!updatedStore)
@@ -377,7 +390,6 @@ exports.updateStore = async (req, res) => {
   }
 };
 
-// 5. Xóa cửa hàng
 exports.deleteStore = async (req, res) => {
   try {
     const deletedStore = await Chbx.findByIdAndDelete(req.params.id);
@@ -395,14 +407,12 @@ exports.addManyStores = async (req, res) => {
   try {
     let data = req.body;
 
-    // Kiểm tra dữ liệu đầu vào
     if (!Array.isArray(data) || data.length === 0) {
       return res.status(400).json({
         message: "Dữ liệu không hợp lệ hoặc rỗng",
       });
     }
 
-    // Lọc bỏ các bản ghi rỗng
     data = data.filter((item) => item.ma_cua_hang && item.ten_cua_hang);
 
     if (data.length === 0) {
@@ -411,7 +421,6 @@ exports.addManyStores = async (req, res) => {
       });
     }
 
-    // Kiểm tra trùng mã cửa hàng trong database
     const existingCodes = await Chbx.find({
       ma_cua_hang: { $in: data.map((item) => item.ma_cua_hang) },
     }).select("ma_cua_hang");
@@ -420,7 +429,6 @@ exports.addManyStores = async (req, res) => {
       existingCodes.map((item) => item.ma_cua_hang)
     );
 
-    // Lọc bỏ các mã đã tồn tại
     const validData = data.filter(
       (item) => !existingCodesSet.has(item.ma_cua_hang)
     );
@@ -435,7 +443,6 @@ exports.addManyStores = async (req, res) => {
       });
     }
 
-    // Thêm vào database
     const inserted = await Chbx.insertMany(validData);
 
     res.status(201).json({
