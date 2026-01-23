@@ -1,43 +1,84 @@
 // models/formkpistaff/formkpistaff.js
 const mongoose = require("mongoose");
 
-const kpiItemSchema = new mongoose.Schema({
-  kpi: { type: String, required: true },        // Tên KPI
-  ty_trong: { type: Number, required: true },   // Tỷ trọng %
-  ty_trong_cuoi: { type: Number, required: true },
+// ✅ Schema cho KPI phụ - so_loi mặc định 0, validate >= 0
+const kpiPhuSchema = new mongoose.Schema(
+  {
+    ten_kpi_phu: { type: String, required: true },
+    so_loi: {
+      type: Number,
+      default: 0,
+      min: [0, "Số lỗi phải >= 0"],
+    },
+  },
+  { _id: false },
+);
 
-  // Các field cũ
-  ky_hieu: { type: String, default: "" },       // Ký hiệu KPI (F1, P1, ...)
-  don_vi_tinh: { type: String, default: "" },   // Đơn vị tính (%, Lỗi, ...)
+const kpiItemSchema = new mongoose.Schema(
+  {
+    kpi: { type: String, required: true },
+    ty_trong: { type: Number, required: true },
+    ty_trong_cuoi: {
+      type: Number,
+      default: function () {
+        return this.ty_trong;
+      },
+    },
 
-  // ✅ Các field bổ sung để đồng bộ với CheckKPIStaff
-  da_thuc_hien: { type: String, default: "" },   // Thực hiện được gì (hoặc %)
-  ke_hoach_quy: { type: String, default: "" },   // Kế hoạch theo quý
-  chu_ki: { type: String, default: "" },         // Chu kỳ (tuần/tháng/quý)
-  nv_danh_gia: { type: String, default: "" },    // Nhân viên tự đánh giá
-  cac_do_luong: { type: String, default: "" },   // Các đo lường liên quan
-  bp_theo_doi: { type: String, default: "" }     // Bộ phận theo dõi
-}, { _id: false });
+    ky_hieu: { type: String, default: "" },
+    don_vi_tinh: { type: String, default: "" },
 
-const formKPIStaffSchema = new mongoose.Schema({
-  ma_nhan_vien: { type: String, required: true },
-  ho_ten: { type: String, required: true },
-  don_vi: { type: String, required: true },
-  chuc_danh: { type: String, default: "" },     // ✅ Thêm chức danh
+    da_thuc_hien: { type: String, default: "" },
+    ke_hoach_quy: { type: String, default: "" },
+    chu_ki: { type: String, default: "Quý" },
+    nv_danh_gia: { type: String, default: "" },
+    cac_do_luong: { type: String, default: "" },
+    bp_theo_doi: { type: String, default: "" },
+  },
+  { _id: false },
+);
 
-  thang: { type: Number, min: 1, max: 12, required: true },
-  nam:   { type: Number, min: 2000, max: 2100, required: true },
+// ✅ Schema cho đơn vị (chính + phụ không bắt buộc)
+const donViSchema = new mongoose.Schema(
+  {
+    chinh: { type: String, required: true },
+    phu: { type: String, default: "" },
+  },
+  { _id: false },
+);
 
-  // Danh sách KPI gốc của nhân viên
-  kpis: { type: [kpiItemSchema], default: [] },
+const formKPIStaffSchema = new mongoose.Schema(
+  {
+    ma_nhan_vien: { type: String, required: true },
+    ho_ten: { type: String, required: true },
+    
+    // ✅ Đổi don_vi thành object có chinh (bắt buộc) và phu (không bắt buộc)
+    don_vi: {
+      type: donViSchema,
+      required: true,
+    },
+    
+    chuc_danh: { type: String, default: "" },
 
-  ghi_chu: { type: String, default: "" }
-}, {
-  timestamps: true
-});
+    quy: { type: Number, min: 1, max: 4, required: true },
+    nam: { type: Number, min: 2000, max: 2100, required: true },
 
-// Unique: 1 NV chỉ có 1 Form KPI cho mỗi tháng/năm
-formKPIStaffSchema.index({ ma_nhan_vien: 1, thang: 1, nam: 1 }, { unique: true });
+    kpis: { type: [kpiItemSchema], default: [] },
+    
+    // ✅ kpi_phu nằm ngang hàng với kpis - Mặc định NULL
+    kpi_phu: {
+      type: [kpiPhuSchema],
+      default: null,
+    },
+    
+    ghi_chu: { type: String, default: "" },
+  },
+  {
+    timestamps: true,
+  },
+);
+
+formKPIStaffSchema.index({ ma_nhan_vien: 1, quy: 1, nam: 1 }, { unique: true });
 
 formKPIStaffSchema.set("toJSON", {
   versionKey: false,
@@ -45,7 +86,7 @@ formKPIStaffSchema.set("toJSON", {
     ret.id = ret._id;
     delete ret._id;
     return ret;
-  }
+  },
 });
 
 module.exports = mongoose.model("FormKPIStaff", formKPIStaffSchema);

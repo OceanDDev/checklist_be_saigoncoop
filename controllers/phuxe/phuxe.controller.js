@@ -1,27 +1,33 @@
 // controllers/phuXeController.js
 const PhuXe = require("../../models/phuxe/phuxe");
 const PhuXeName = require("../../models/phuxe/tenphuxe");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
 const CuaHang = require("../../models/dieuvan/cuahang/cuahang");
 const Chbx = require("../../models/phuxe/chbx");
+const multer = require("multer");
+const cloudinary = require("cloudinary").v2;
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
-// ✅ Tạo thư mục uploads nếu chưa có
-const uploadsDir = path.join(__dirname, "../../uploads/phuxe");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-  console.log("✅ Created uploads directory:", uploadsDir);
-}
+// ✅ Cấu hình Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
-// 📸 Cấu hình multer để upload hình ảnh
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir); // Dùng đường dẫn tuyệt đối
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, "phuxe-" + uniqueSuffix + path.extname(file.originalname));
+// ✅ Cấu hình Cloudinary Storage cho Multer
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "phuxe", // Thư mục trên Cloudinary
+    allowed_formats: ["jpg", "jpeg", "png", "webp"],
+    transformation: [
+      {
+        width: 1920,
+        height: 1080,
+        crop: "limit", // Giữ tỷ lệ, không vượt quá kích thước
+        quality: 80, // Giảm quality để tiết kiệm dung lượng
+      },
+    ],
   },
 });
 
@@ -43,12 +49,166 @@ const upload = multer({
 exports.uploadImage = upload.single("hinh_anh");
 exports.uploadImages = upload.array("images", 10);
 
-// 🔧 Helper function: Tạo URL đầy đủ
-const getFullImageUrl = (req, filename) => {
-  const protocol = req.protocol; // http hoặc https
-  const host = req.get("host"); // localhost:5000 hoặc bes1.khovanscl.io.vn
-  return `${protocol}://${host}/uploads/phuxe/${filename}`;
+// ✅ Hàm tự động xóa ảnh cũ khi storage gần đầy
+const autoCleanupOldImages = async () => {
+  try {
+    console.log("🔍 Đang kiểm tra storage quota...");
+
+    // 1. Kiểm tra quota Cloudinary
+    const usage = await cloudinary.api.usage();
+    const usedPercentage = (usage.storage.used / usage.storage.limit) * 100;
+
+    console.log(`📊 Storage usage: ${usedPercentage.toFixed(1)}%`);
+    console.log(
+      `💾 Used: ${(usage.storage.used / 1024 / 1024).toFixed(2)}MB / ${(
+        usage.storage.limit /
+        1024 /
+        1024
+      ).toFixed(2)}MB`
+    );
+
+    // 2. Nếu đạt ngưỡng 90% → Bắt đầu xóa
+    if (usedPercentage >= 90) {
+      console.log("🗑️ Storage đạt 90%, đang tự động xóa ảnh cũ...");
+
+      // 3. Lấy danh sách ảnh cũ nhất
+      const oldRecords = await PhuXe.find({
+        hinh_anh: { $exists: true, $ne: null, $ne: "" },
+      })
+        .sort({ thoi_gian_xong_chuyen: 1 }) // Sắp xếp từ cũ → mới
+        .limit(50); // Xóa tối đa 50 ảnh/lần
+
+      if (oldRecords.length === 0) {
+        console.log("⚠️ Không tìm thấy ảnh cũ để xóa");
+        return { deleted: 0, message: "No images to delete" };
+      }
+
+      console.log(`📋 Tìm thấy ${oldRecords.length} ảnh cũ để xóa`);
+      let deletedCount = 0;
+      const deletedImages = [];
+
+      for (const record of oldRecords) {
+        try {
+          const imageUrl = record.hinh_anh;
+
+          // Extract public_id từ URL Cloudinary
+          // URL mẫu: https://res.cloudinary.com/xxx/image/upload/v123456/phuxe/phuxe-123.jpg
+          const matches = imageUrl.match(/\/phuxe\/([^\.]+)/);
+
+          if (matches && matches[1]) {
+            const publicId = `phuxe/${matches[1]}`;
+
+            // Xóa ảnh trên Cloudinary
+            const result = await cloudinary.uploader.destroy(publicId);
+
+            if (result.result === "ok" || result.result === "not found") {
+              console.log(`🗑️ Đã xóa ảnh: ${publicId}`);
+
+              // Xóa URL trong database
+              await PhuXe.findByIdAndUpdate(record._id, {
+                $unset: { hinh_anh: "" },
+              });
+
+              deletedCount++;
+              deletedImages.push({
+                id: record._id,
+                publicId: publicId,
+                date: record.thoi_gian_xong_chuyen,
+              });
+            } else {
+              console.warn(`⚠️ Không thể xóa ảnh ${publicId}:`, result);
+            }
+          } else {
+            console.warn(`⚠️ Không parse được public_id từ URL: ${imageUrl}`);
+          }
+        } catch (err) {
+          console.error(`❌ Lỗi xóa ảnh ${record._id}:`, err.message);
+        }
+
+        // 6. Kiểm tra lại quota sau mỗi 10 ảnh
+        if (deletedCount % 10 === 0 && deletedCount > 0) {
+          const newUsage = await cloudinary.api.usage();
+          const newPercentage =
+            (newUsage.storage.used / newUsage.storage.limit) * 100;
+
+          console.log(
+            `📊 Quota sau khi xóa ${deletedCount} ảnh: ${newPercentage.toFixed(
+              1
+            )}%`
+          );
+
+          // Dừng khi xuống dưới 85%
+          if (newPercentage < 85) {
+            console.log(
+              `✅ Đã giải phóng đủ dung lượng: ${newPercentage.toFixed(1)}%`
+            );
+            break;
+          }
+        }
+      }
+
+      // Kiểm tra quota cuối cùng
+      const finalUsage = await cloudinary.api.usage();
+      const finalPercentage =
+        (finalUsage.storage.used / finalUsage.storage.limit) * 100;
+
+      console.log(`✅ Cleanup hoàn tất: Đã xóa ${deletedCount} ảnh`);
+      console.log(`📊 Storage sau cleanup: ${finalPercentage.toFixed(1)}%`);
+
+      return {
+        deleted: deletedCount,
+        newUsage: finalPercentage,
+        deletedImages: deletedImages,
+      };
+    }
+
+    return { deleted: 0, message: "Storage vẫn còn đủ" };
+  } catch (error) {
+    console.error("❌ Lỗi autoCleanupOldImages:", error);
+    throw error;
+  }
 };
+
+// ✅ Middleware kiểm tra và xóa tự động trước khi upload
+const autoCleanupMiddleware = async (req, res, next) => {
+  try {
+    const usage = await cloudinary.api.usage();
+    const usedPercentage = (usage.storage.used / usage.storage.limit) * 100;
+
+    console.log(`📊 Current storage: ${usedPercentage.toFixed(1)}%`);
+
+    // Nếu đạt 90% → Tự động xóa ảnh cũ
+    if (usedPercentage >= 90) {
+      console.log(
+        `⚠️ Storage đạt ${usedPercentage.toFixed(1)}% - Đang tự động dọn dẹp...`
+      );
+
+      const cleanupResult = await autoCleanupOldImages();
+
+      console.log(`✅ Đã xóa ${cleanupResult.deleted} ảnh cũ`);
+
+      // Nếu vẫn đầy sau khi xóa → Từ chối upload
+      if (cleanupResult.newUsage && cleanupResult.newUsage >= 95) {
+        return res.status(400).json({
+          message:
+            "Hệ thống lưu trữ vẫn đầy sau khi dọn dẹp. Vui lòng liên hệ quản trị viên.",
+          errorType: "STORAGE_FULL_AFTER_CLEANUP",
+          usage: cleanupResult.newUsage,
+        });
+      }
+    }
+
+    next();
+  } catch (error) {
+    console.error("❌ Lỗi autoCleanupMiddleware:", error);
+    // Vẫn cho phép upload nếu cleanup lỗi
+    next();
+  }
+};
+
+// Export cleanup functions
+exports.autoCleanupMiddleware = autoCleanupMiddleware;
+exports.autoCleanupOldImages = autoCleanupOldImages;
 
 // 📦 Lấy danh sách tất cả phụ xe
 exports.getAllPhuXe = async (req, res) => {
@@ -105,11 +265,11 @@ exports.addPhuXe = async (req, res) => {
   try {
     const phuXeData = req.body;
 
-    // ✅ Nếu có upload file ảnh - LƯU URL ĐẦY ĐỦ
+    // ✅ Cloudinary tự động trả URL đầy đủ trong req.file.path
     if (req.file) {
-      phuXeData.hinh_anh = getFullImageUrl(req, req.file.filename);
+      phuXeData.hinh_anh = req.file.path; // URL từ Cloudinary
       phuXeData.thoi_gian_xong_chuyen = new Date();
-      console.log("📸 Image saved:", phuXeData.hinh_anh);
+      console.log("📸 Image saved to Cloudinary:", phuXeData.hinh_anh);
     }
 
     const newPhuXe = new PhuXe(phuXeData);
@@ -121,7 +281,11 @@ exports.addPhuXe = async (req, res) => {
       ngay_import: saved.createdAt,
     });
   } catch (error) {
-    res.status(500).json({ message: "Lỗi khi thêm phụ xe", error });
+    console.error("❌ Error adding phu xe:", error);
+    res.status(500).json({
+      message: "Lỗi khi thêm phụ xe",
+      error: error.message,
+    });
   }
 };
 
@@ -194,59 +358,69 @@ exports.xacNhanDieuVan = async (req, res) => {
   }
 };
 
-// ✏️ Cập nhật phụ xe theo ID (có thể cập nhật hình ảnh)
-exports.updatePhuXe = async (req, res) => {
-  try {
-    const updateData = req.body;
+  exports.updatePhuXe = async (req, res) => {
+    try {
+      console.log("📥 Update request body:", req.body);
+      console.log("📷 Upload file:", req.file);
 
-    // Nếu có cập nhật điều vận xác nhận
-    if (updateData.dieu_van_xac_nhan) {
-      updateData.thoi_gian_di = new Date();
+      // ✅ QUAN TRỌNG: Tách riêng updateData
+      const updateData = {};
+
+      // Copy các field từ req.body (KHÔNG BAO GỒM hinh_anh)
+      Object.keys(req.body).forEach((key) => {
+        if (key !== "hinh_anh") {
+          // ✅ Bỏ qua hinh_anh từ body
+          updateData[key] = req.body[key];
+        }
+      });
+
+      // Nếu có cập nhật điều vận xác nhận
+      if (updateData.dieu_van_xac_nhan) {
+        updateData.thoi_gian_di = new Date();
+      }
+
+      // ✅ CHỈ CÂP NHẬT hinh_anh khi có file upload
+      if (req.file) {
+        updateData.hinh_anh = req.file.path; // URL từ Cloudinary
+        updateData.thoi_gian_xong_chuyen = new Date();
+        console.log("✅ New image URL:", updateData.hinh_anh);
+      } else {
+        console.log("⚠️ No file uploaded, keeping existing image");
+      }
+
+      console.log("📝 Final update data:", updateData);
+
+      const updated = await PhuXe.findByIdAndUpdate(req.params.id, updateData, {
+        new: true,
+        runValidators: false, // ✅ Tắt validation để không bắt buộc các field
+      });
+
+      if (!updated) {
+        return res
+          .status(404)
+          .json({ message: "Không tìm thấy phụ xe để cập nhật" });
+      }
+
+      console.log("✅ Updated document:", updated);
+      res.status(200).json(updated);
+    } catch (error) {
+      console.error("❌ Error updating phu xe:", error);
+      console.error("Error stack:", error.stack);
+
+      // Xử lý lỗi Cloudinary cụ thể
+      if (error.message?.includes("storage quota") || error.http_code === 400) {
+        return res.status(400).json({
+          message: "Hệ thống lưu trữ đã đầy. Vui lòng liên hệ quản trị viên.",
+          errorType: "STORAGE_LIMIT_EXCEEDED",
+        });
+      }
+
+      res.status(500).json({
+        message: "Lỗi khi cập nhật phụ xe",
+        error: error.message,
+      });
     }
-
-    // ✅ Nếu có upload file ảnh mới (single) - LƯU URL ĐẦY ĐỦ
-    if (req.file) {
-      updateData.hinh_anh = getFullImageUrl(req, req.file.filename);
-      updateData.thoi_gian_xong_chuyen = new Date();
-      console.log("📸 Single image URL:", updateData.hinh_anh);
-      console.log("📁 File path on disk:", req.file.path);
-    }
-
-    // ✅ Nếu có upload nhiều ảnh (multiple) - LƯU URL ĐẦY ĐỦ
-    if (req.files && req.files.length > 0) {
-      const imageUrls = req.files.map((file) =>
-        getFullImageUrl(req, file.filename)
-      );
-
-      updateData.hinh_anh = imageUrls[0];
-      updateData.thoi_gian_xong_chuyen = new Date();
-
-      console.log("📸 Multiple images URLs:", imageUrls);
-      console.log("📁 Files saved to disk:");
-      req.files.forEach((file) => console.log("  -", file.path));
-    } else if (!req.file) {
-      console.log("⚠️ No files received!");
-    }
-
-    const updated = await PhuXe.findByIdAndUpdate(req.params.id, updateData, {
-      new: true,
-    });
-
-    if (!updated) {
-      return res
-        .status(404)
-        .json({ message: "Không tìm thấy phụ xe để cập nhật" });
-    }
-
-    console.log("✅ Updated document - hinh_anh:", updated.hinh_anh);
-    res.status(200).json(updated);
-  } catch (error) {
-    console.error("❌ Error updating phu xe:", error);
-    res
-      .status(500)
-      .json({ message: "Lỗi khi cập nhật phụ xe", error: error.message });
-  }
-};
+  };
 
 // 🗑️ Xóa phụ xe theo ID
 exports.deletePhuXe = async (req, res) => {
@@ -256,14 +430,20 @@ exports.deletePhuXe = async (req, res) => {
       return res.status(404).json({ message: "Không tìm thấy phụ xe để xóa" });
     }
 
-    // TODO: Xóa file ảnh nếu có
-    // if (deleted.hinh_anh) {
-    //   const filename = path.basename(deleted.hinh_anh);
-    //   const filePath = path.join(uploadsDir, filename);
-    //   if (fs.existsSync(filePath)) {
-    //     fs.unlinkSync(filePath);
-    //   }
-    // }
+    // ✅ Xóa ảnh trên Cloudinary (optional)
+    if (deleted.hinh_anh) {
+      try {
+        const matches = deleted.hinh_anh.match(/\/phuxe\/([^\.]+)/);
+        if (matches && matches[1]) {
+          const publicId = `phuxe/${matches[1]}`;
+          await cloudinary.uploader.destroy(publicId);
+          console.log(`🗑️ Đã xóa ảnh Cloudinary: ${publicId}`);
+        }
+      } catch (err) {
+        console.error("⚠️ Không thể xóa ảnh Cloudinary:", err.message);
+        // Không throw error, vẫn xóa record trong DB
+      }
+    }
 
     res.status(200).json({ message: "Đã xóa phụ xe thành công" });
   } catch (error) {
