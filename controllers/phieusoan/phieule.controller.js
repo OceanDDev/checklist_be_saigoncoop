@@ -199,7 +199,7 @@ exports.getAllPhieuLe = async (req, res) => {
 
     // ✅ QUAN TRỌNG: Filter mã CH và chuyến LUÔN ÁP DỤNG (không phụ thuộc search)
     if (mach) {
-      filter.mach = { $regex: mach, $options: "i" };
+      filter.mach = { $regex: `^${mach}$`, $options: "i" };
     }
 
     if (chuyen) {
