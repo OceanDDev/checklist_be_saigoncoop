@@ -8,6 +8,17 @@ const phieuSoanController = require("../../controllers/phieusoan/phieusoan.contr
 // ==================== DINH VI ====================
 router.post("/dinhvi/import", dinhViController.importManyDinhVi); // Import Excel
 router.post("/dinhvi/clear-all", dinhViController.clearAllDinhVi); // Xóa toàn bộ
+router.patch("/dinhvi/update-pack", dinhViController.updatePackBySKU);
+
+// ✅ THÊM MỚI - Lấy pack (quy cách) theo nhiều SKU
+router.post("/dinhvi/pack/bulk", dinhViController.getPackByMultipleSKU);
+router.get("/dinhvi/pack/:sku", dinhViController.getPackBySKU);
+
+router.post(
+  "/dinhvi/khoi-luong/bulk",
+  dinhViController.getKhoiLuongByMultipleSKU,
+);
+router.get("/dinhvi/khoi-luong/:sku", dinhViController.getKhoiLuongBySKU);
 router.get("/dinhvi", dinhViController.getAllDinhVi); // Get all
 router.get("/dinhvi/:id", dinhViController.getDinhViById); // Get by ID
 router.post("/dinhvi", dinhViController.createDinhVi); // Create one
@@ -19,7 +30,10 @@ router.get("/donhang/search", donHangController.searchDonHang); // Search
 router.post("/donhang/many", donHangController.createManyDonHang); // Create many
 router.post("/donhang/clear-all", donHangController.deleteManyDonHang); // Clear all
 router.get("/donhang", donHangController.getAllDonHang); // Get all
-router.post('/donhang/check-duplicate', donHangController.checkDuplicateDonHang);
+router.post(
+  "/donhang/check-duplicate",
+  donHangController.checkDuplicateDonHang,
+);
 router.get("/donhang/:id", donHangController.getDonHangById); // Get by ID
 router.post("/donhang", donHangController.createDonHang); // Create one
 router.put("/donhang/:id/trangthai", donHangController.updateTrangThai); // Update status
@@ -34,14 +48,19 @@ router.delete("/donhang/:id", donHangController.deleteDonHang); // Delete
 router.get("/phieusoan/statistics", phieuSoanController.getStatistics); // Thống kê
 
 // ✅ Special orders endpoints - UPDATED (MUST be before /:id)
-router.get("/phieusoan/special-orders/count", phieuSoanController.getSpecialOrdersCount); // Đếm phiếu soạn pack=1
+router.get(
+  "/phieusoan/special-orders/count",
+  phieuSoanController.getSpecialOrdersCount,
+); // Đếm phiếu soạn pack=1
 router.get("/phieusoan/special-orders", phieuSoanController.getSpecialOrders); // Lấy phiếu soạn pack=1
 
 // ✅ Update chẵn/lẻ cho hàng đặc thù
-router.post("/phieusoan/update-special-chan-le", phieuSoanController.updateSpecialChanLe);
-router.put('/phieusoan/update-many', phieuSoanController.updateMany);
+router.post(
+  "/phieusoan/update-special-chan-le",
+  phieuSoanController.updateSpecialChanLe,
+);
+router.put("/phieusoan/update-many", phieuSoanController.updateMany);
 
-    
 // Process orders
 router.post("/phieusoan/process", phieuSoanController.processOrders); // Xử lý tất cả đơn hàng
 

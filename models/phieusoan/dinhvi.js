@@ -11,6 +11,7 @@ const dinhViSchema = new mongoose.Schema({
       return this.pack === "1" ? "Hàng Đặc Thù" : "Hàng bình thường";
     }
   },
+  khoiluong:{ type: Number, required: true },
   ngay_import: { type: Date, default: Date.now },
   maNCC: { type: String },
   maNH: { type: String },

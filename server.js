@@ -57,6 +57,7 @@ const phieuSoanRoutes = require("./routes/phieusoan/phieusoan.routes.js");
 const phuXeRoutes = require("./routes/phuxe/phuxe.routes.js");  
 const TbbRoutes = require("./routes/ttb/ttb.routes.js");  
 const ThietBiRoutes = require("./routes/ttb/ttb.routes.js");  
+const PhieuLeRoutes = require("./routes/phieusoan/phieule.routes.js")
 
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
@@ -75,6 +76,9 @@ app.use("/api/saigoncoop", phieuSoanRoutes);
 app.use("/api/saigoncoop", phuXeRoutes);
 app.use("/api/saigoncoop", TbbRoutes);
 app.use("/api/saigoncoop", ThietBiRoutes);
+app.use("/api/saigoncoop", PhieuLeRoutes);
+
+
 
 // ✅ Kết nối MongoDB
 mongoose
