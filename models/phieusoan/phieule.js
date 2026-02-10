@@ -39,7 +39,7 @@ const phieuLeSchema = new mongoose.Schema(
     tench: { type: String, default: "" },
     chuyen: { type: String, default: "" },
     ghi_chu_ch: { type: String, default: "" },
-
+    ngay_in_phieu: { type: Date, default: Date.now },
     ngay_import: { type: Date, default: Date.now },
     ngay_cap_nhat: { type: Date, default: Date.now },
   },
@@ -53,10 +53,22 @@ const phieuLeSchema = new mongoose.Schema(
 // ✅ Virtual field: Tổng kiện
 phieuLeSchema.virtual("tong_kien").get(function () {
   if (!this.chi_tiet || this.chi_tiet.length === 0) return 0;
-  return this.chi_tiet.reduce(
-    (sum, item) => sum + (item.packs_to_pick || 0),
-    0,
-  );
+
+  let total = 0; // ✅ Giữ số thập phân
+
+  for (const item of this.chi_tiet) {
+    // ✅ ƯU TIÊN: packs_to_pick_1 nếu có giá trị > 0
+    if (item.packs_to_pick_1 && item.packs_to_pick_1 > 0) {
+      total += item.packs_to_pick_1; // ✅ CỘNG TRỰC TIẾP, KHÔNG LÀM TRÒN
+    }
+    // ✅ FALLBACK: Dùng packs_to_pick
+    else if (item.packs_to_pick && item.packs_to_pick > 0) {
+      total += item.packs_to_pick; // ✅ CỘNG TRỰC TIẾP, KHÔNG LÀM TRÒN
+    }
+  }
+
+  // ✅ LÀM TRÒN LÊN MỘT LẦN DUY NHẤT Ở CUỐI
+  return Math.ceil(total);
 });
 
 // ✅ NEW: Virtual field - Tổng khối lượng = SUM(quantity * khoi_luong)

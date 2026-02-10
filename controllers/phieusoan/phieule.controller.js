@@ -46,6 +46,7 @@ async function populateKhoiLuongForPhieuLe(phieuLe) {
     console.error("❌ Lỗi khi populate khối lượng:", error);
   }
 }
+
 async function getPackByMultipleSKU(skuList) {
   try {
     const dinhViList = await DinhVi.find(
@@ -67,11 +68,9 @@ async function getPackByMultipleSKU(skuList) {
   }
 }
 
-/**
- * Tính tổng kiện dựa trên chi_tiet
- */
+// ===== CALCULATE TONG KIEN - TÍNH TỔNG TRƯỚC, LÀM TRÒN SAU =====
 async function calculateTongKien(chiTiet) {
-  let tongKien = 0;
+  let tongKien = 0; // ✅ Giữ số thập phân, chưa làm tròn
 
   const skusNeedPack = chiTiet
     .filter((item) => item.pack_unit === 1)
@@ -82,37 +81,71 @@ async function calculateTongKien(chiTiet) {
     packUnit1Map = await getPackByMultipleSKU(skusNeedPack);
   }
 
+  console.log("\n🔍 === BẮT ĐẦU TÍNH TỔNG KIỆN ===");
+  console.log(`📋 Tổng số items: ${chiTiet.length}`);
+
   for (const item of chiTiet) {
+    const before = tongKien;
+
+    console.log(`\n📦 SKU ${item.sku}:`, {
+      pack_unit: item.pack_unit,
+      quantity: item.quantity,
+      packs_to_pick: item.packs_to_pick,
+      packs_to_pick_1: item.packs_to_pick_1,
+    });
+
+    // ✅ ƯU TIÊN: packs_to_pick_1 nếu có giá trị > 0
+    if (item.packs_to_pick_1 && item.packs_to_pick_1 > 0) {
+      tongKien += item.packs_to_pick_1; // ✅ CỘNG TRỰC TIẾP, KHÔNG LÀM TRÒN
+      console.log(`  ✅ Dùng packs_to_pick_1: ${item.packs_to_pick_1}`);
+      console.log(`  📊 Tổng: ${before.toFixed(2)} → ${tongKien.toFixed(2)}`);
+      continue; // ✅ SKIP hết logic phía dưới
+    }
+
+    // ✅ FALLBACK: Không có packs_to_pick_1 hoặc = 0
     if (item.pack_unit === 1) {
-      // Ưu tiên dùng packs_to_pick_1 đã lưu
-      if (item.packs_to_pick_1 !== undefined && item.packs_to_pick_1 !== null) {
-        tongKien += item.packs_to_pick_1;
+      // Thử tính từ pack (DinhVi)
+      const packUnit1 = packUnit1Map[item.sku];
+
+      if (packUnit1 && packUnit1 > 0) {
+        const rawValue = item.quantity / packUnit1;
+        tongKien += rawValue; // ✅ CỘNG TRỰC TIẾP, KHÔNG LÀM TRÒN
+        console.log(
+          `  ✅ Tính từ pack: ${item.quantity}/${packUnit1} = ${rawValue.toFixed(2)}`,
+        );
+      } else if (item.packs_to_pick && item.packs_to_pick > 0) {
+        tongKien += item.packs_to_pick; // ✅ CỘNG TRỰC TIẾP
+        console.log(`  ✅ Dùng packs_to_pick: ${item.packs_to_pick}`);
       } else {
-        const packUnit1 = packUnit1Map[item.sku];
-        if (packUnit1 && packUnit1 > 0) {
-          const rawValue = item.quantity / packUnit1;
-          const decimalPart = rawValue % 1;
-
-          let picks;
-          if (decimalPart === 0) {
-            picks = rawValue;
-          } else if (decimalPart > 0.5) {
-            picks = Math.ceil(rawValue);
-          } else {
-            picks = Math.floor(rawValue) + 1;
-          }
-
-          tongKien += picks;
-        } else if (item.packs_to_pick) {
-          tongKien += item.packs_to_pick;
-        }
+        console.log(`  ⚠️ KHÔNG CÓ GIÁ TRỊ ĐỂ TÍNH!`);
       }
     } else {
-      tongKien += item.packs_to_pick || 0;
+      // pack_unit khác 1
+      if (item.packs_to_pick && item.packs_to_pick > 0) {
+        tongKien += item.packs_to_pick; // ✅ CỘNG TRỰC TIẾP
+        console.log(
+          `  ✅ pack_unit=${item.pack_unit}, dùng packs_to_pick: ${item.packs_to_pick}`,
+        );
+      } else {
+        console.log(
+          `  ⚠️ pack_unit=${item.pack_unit} NHƯNG KHÔNG CÓ packs_to_pick!`,
+        );
+      }
     }
+
+    console.log(
+      `  📊 Tổng: ${before.toFixed(2)} → ${tongKien.toFixed(2)} (+${(tongKien - before).toFixed(2)})`,
+    );
   }
 
-  return tongKien;
+  // ✅ LÀM TRÒN LÊN Ở CUỐI CÙNG
+  const finalTongKien = Math.ceil(tongKien);
+
+  console.log(`\n✅ === KẾT QUẢ ===`);
+  console.log(`📊 Tổng thập phân: ${tongKien.toFixed(2)}`);
+  console.log(`📊 Tổng làm tròn: ${finalTongKien} KIỆN\n`);
+
+  return finalTongKien;
 }
 
 /**
@@ -136,7 +169,9 @@ async function updateMultipleChiTietHelper(phieuId, updates) {
 
       if (itemIndex !== -1) {
         // ✅ CHỈ cập nhật packs_to_pick_1
-        phieu.chi_tiet[itemIndex].packs_to_pick_1 = update.packs_to_pick_1;
+        phieu.chi_tiet[itemIndex].packs_to_pick_1 = parseFloat(
+          parseFloat(update.packs_to_pick_1).toFixed(2),
+        );
         updatedCount++;
       } else {
         notFoundSkus.push(update.sku);
@@ -168,6 +203,7 @@ async function updateMultipleChiTietHelper(phieuId, updates) {
   }
 }
 
+// ===== EXPORTS.GETALLPHIEULE - Có LOG VÀ FILTER NGAY_IN_PHIEU =====
 exports.getAllPhieuLe = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -181,14 +217,17 @@ exports.getAllPhieuLe = async (req, res) => {
       trang_thai,
       mach,
       chuyen,
+      quan,
       search,
       startDate,
       endDate,
+      printStartDate, // ✅ THÊM: Filter ngày in phiếu bắt đầu
+      printEndDate, // ✅ THÊM: Filter ngày in phiếu kết thúc
     } = req.query;
 
     const filter = {};
 
-    // ✅ FILTER RIÊNG LẺ - ÁP DỤNG TRƯỚC (QUAN TRỌNG!)
+    // ✅ FILTER RIÊNG LẺ
     if (so_document) {
       filter.so_document = parseInt(so_document);
     }
@@ -197,7 +236,6 @@ exports.getAllPhieuLe = async (req, res) => {
       filter.trang_thai = trang_thai;
     }
 
-    // ✅ QUAN TRỌNG: Filter mã CH và chuyến LUÔN ÁP DỤNG (không phụ thuộc search)
     if (mach) {
       filter.mach = { $regex: `^${mach}$`, $options: "i" };
     }
@@ -206,7 +244,11 @@ exports.getAllPhieuLe = async (req, res) => {
       filter.chuyen = { $regex: chuyen, $options: "i" };
     }
 
-    // Filter theo SKU hoặc Slot trong chi tiết
+    if (quan) {
+      const cleanQuan = quan.trim().replace(/\s+/g, "\\s+");
+      filter.quan = { $regex: `^${cleanQuan}$`, $options: "i" };
+    }
+
     if (sku) {
       filter["chi_tiet.sku"] = parseInt(sku);
     }
@@ -232,7 +274,24 @@ exports.getAllPhieuLe = async (req, res) => {
       }
     }
 
-    // ✅ SEARCH TỔNG HỢP - CHỈ ÁP DỤNG KHI CÓ GIÁ TRỊ
+    // ✅ THÊM: Filter theo ngày in phiếu (printStartDate & printEndDate)
+    if (printStartDate || printEndDate) {
+      filter.ngay_in_phieu = {};
+
+      if (printStartDate) {
+        const start = new Date(printStartDate);
+        start.setHours(0, 0, 0, 0);
+        filter.ngay_in_phieu.$gte = start;
+      }
+
+      if (printEndDate) {
+        const end = new Date(printEndDate);
+        end.setHours(23, 59, 59, 999);
+        filter.ngay_in_phieu.$lte = end;
+      }
+    }
+
+    // ✅ SEARCH TỔNG HỢP
     if (search) {
       const searchNum = parseInt(search);
       const conditions = [
@@ -251,7 +310,6 @@ exports.getAllPhieuLe = async (req, res) => {
         conditions.push({ sd_tf: searchNum });
       }
 
-      // ✅ NẾU CÓ FILTER RIÊNG MÃ CH HOẶC CHUYẾN, KẾT HỢP VỚI $AND
       if (mach || chuyen) {
         const existingFilters = { ...filter };
         delete existingFilters.mach;
@@ -260,13 +318,12 @@ exports.getAllPhieuLe = async (req, res) => {
         filter.$and = [{ $or: conditions }];
 
         if (mach) {
-          filter.$and.push({ mach: { $regex: mach, $options: "i" } });
+          filter.$and.push({ mach: { $regex: `^${mach}$`, $options: "i" } });
         }
         if (chuyen) {
           filter.$and.push({ chuyen: { $regex: chuyen, $options: "i" } });
         }
 
-        // Thêm các filter còn lại
         Object.assign(filter, existingFilters);
       } else {
         filter.$or = conditions;
@@ -276,15 +333,37 @@ exports.getAllPhieuLe = async (req, res) => {
     const [total, phieuLes] = await Promise.all([
       PhieuLe.countDocuments(filter),
       PhieuLe.find(filter).sort({ ngay_import: -1 }).skip(skip).limit(limit),
-      // ✅ BỎ .lean() ĐỂ VIRTUAL FIELD HOẠT ĐỘNG
     ]);
 
     await Promise.all(
       phieuLes.map((phieu) => populateKhoiLuongForPhieuLe(phieu)),
     );
 
+    // ✅ LOG: Kiểm tra virtual field
+    if (phieuLes.length > 0) {
+      console.log("\n🔍 === SAMPLE PHIẾU AFTER POPULATE ===");
+      console.log("  so_document:", phieuLes[0].so_document);
+      console.log("  tong_kien (virtual):", phieuLes[0].tong_kien);
+      console.log("  chi_tiet count:", phieuLes[0].chi_tiet?.length);
+
+      // ✅ Tính toán lại để verify
+      let verifyTotal = 0;
+      for (const item of phieuLes[0].chi_tiet) {
+        if (item.packs_to_pick_1 && item.packs_to_pick_1 > 0) {
+          verifyTotal += Math.ceil(item.packs_to_pick_1);
+        } else if (item.packs_to_pick && item.packs_to_pick > 0) {
+          verifyTotal += Math.ceil(item.packs_to_pick);
+        }
+      }
+      console.log("  tong_kien (verify):", verifyTotal);
+      console.log(
+        "  Khớp?",
+        verifyTotal === phieuLes[0].tong_kien ? "✅" : "❌",
+      );
+    }
+
     res.status(200).json({
-      data: phieuLes, // ✅ Tự động có tong_kien
+      data: phieuLes,
       pagination: {
         total,
         page,
@@ -894,6 +973,7 @@ exports.importTxtPhieuLeMultiple = async (req, res) => {
       .json({ message: "Lỗi khi import nhiều file txt", error: error.message });
   }
 };
+
 // ===== UPDATE - Cập nhật phiếu lẻ =====
 exports.updatePhieuLe = async (req, res) => {
   try {
@@ -908,6 +988,7 @@ exports.updatePhieuLe = async (req, res) => {
       ghi_chu_ch,
       ghi_chu_phieu,
       so_lan_in_phieu,
+      ngay_in_phieu, // ✅ THÊM
       tong_khoi_luong,
     } = req.body;
 
@@ -929,6 +1010,9 @@ exports.updatePhieuLe = async (req, res) => {
     if (ghi_chu_phieu !== undefined) updateData.ghi_chu_phieu = ghi_chu_phieu;
     if (so_lan_in_phieu !== undefined)
       updateData.so_lan_in_phieu = so_lan_in_phieu;
+    if (ngay_in_phieu !== undefined) updateData.ngay_in_phieu = ngay_in_phieu; // ✅ THÊM
+    if (tong_khoi_luong !== undefined)
+      updateData.tong_khoi_luong = tong_khoi_luong;
 
     const updated = await PhieuLe.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
@@ -1135,7 +1219,6 @@ function parseTxtContent(content) {
           continue;
         }
 
-        // ... (giữ nguyên logic parse chi tiết)
         const seq = parseInt(parts[0]);
         const slot = parts[1];
         const sku = parseInt(parts[2]);
@@ -1223,6 +1306,7 @@ function parseTxtContent(content) {
     return null;
   }
 }
+
 // ===== UPDATE MANY - Cập nhật nhiều phiếu lẻ cùng lúc =====
 exports.updateManyPhieuLe = async (req, res) => {
   try {
@@ -1250,6 +1334,7 @@ exports.updateManyPhieuLe = async (req, res) => {
       "quan",
       "chuyen",
       "so_lan_in_phieu",
+      "ngay_in_phieu", // ✅ THÊM
       "tong_khoi_luong",
       "ghi_chu_ch",
       "ghi_chu_phieu",
@@ -1346,6 +1431,7 @@ exports.updateManyPhieuLeByFilter = async (req, res) => {
       "quan",
       "chuyen",
       "so_lan_in_phieu",
+      "ngay_in_phieu", // ✅ THÊM
       "tong_khoi_luong",
       "ghi_chu_ch",
       "ghi_chu_phieu",
@@ -1594,8 +1680,9 @@ exports.updatePackUnit1ForPhieu = async (req, res) => {
         if (pack && pack > 0) {
           // Tính pack_unit_1 và packs_to_pick_1
           const pack_unit_1 = pack;
-          const packs_to_pick_1 = Math.ceil(item.quantity / pack_unit_1);
-
+          const packs_to_pick_1 = parseFloat(
+            (item.quantity / pack_unit_1).toFixed(2),
+          );
           // Tạo bulk operation để cập nhật
           bulkOps.push({
             updateOne: {
@@ -1724,7 +1811,7 @@ exports.updateMultipleChiTiet = async (req, res) => {
 
       if (
         typeof update.packs_to_pick_1 !== "number" ||
-        update.packs_to_pick_1 < 0
+        update.packs_to_pick_1 < 0  
       ) {
         return res.status(400).json({
           success: false,
