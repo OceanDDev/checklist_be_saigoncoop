@@ -221,8 +221,8 @@ exports.getAllPhieuLe = async (req, res) => {
       search,
       startDate,
       endDate,
-      printStartDate, // ✅ THÊM: Filter ngày in phiếu bắt đầu
-      printEndDate, // ✅ THÊM: Filter ngày in phiếu kết thúc
+      printStartDate,
+      printEndDate,
     } = req.query;
 
     const filter = {};
@@ -257,7 +257,7 @@ exports.getAllPhieuLe = async (req, res) => {
       filter["chi_tiet.slot"] = { $regex: String(slot), $options: "i" };
     }
 
-    // ✅ Filter theo ngày import (startDate & endDate)
+    // ✅ Filter theo ngày import
     if (startDate || endDate) {
       filter.ngay_import = {};
 
@@ -274,21 +274,32 @@ exports.getAllPhieuLe = async (req, res) => {
       }
     }
 
-    // ✅ THÊM: Filter theo ngày in phiếu (printStartDate & printEndDate)
+    // ✅ 🔧 FIX: Filter theo ngày in phiếu
     if (printStartDate || printEndDate) {
-      filter.ngay_in_phieu = {};
+      const printDateFilter = {};
+
+      // ✅ QUAN TRỌNG: Chỉ lấy phiếu có ngay_in_phieu (đã được in)
+      printDateFilter.$ne = null;
 
       if (printStartDate) {
         const start = new Date(printStartDate);
         start.setHours(0, 0, 0, 0);
-        filter.ngay_in_phieu.$gte = start;
+        printDateFilter.$gte = start;
       }
 
       if (printEndDate) {
         const end = new Date(printEndDate);
         end.setHours(23, 59, 59, 999);
-        filter.ngay_in_phieu.$lte = end;
+        printDateFilter.$lte = end;
       }
+
+      filter.ngay_in_phieu = printDateFilter;
+
+      console.log("🔍 Print Date Filter:", {
+        printStartDate,
+        printEndDate,
+        filter: filter.ngay_in_phieu,
+      });
     }
 
     // ✅ SEARCH TỔNG HỢP
@@ -330,6 +341,8 @@ exports.getAllPhieuLe = async (req, res) => {
       }
     }
 
+    console.log("📋 Final Filter:", JSON.stringify(filter, null, 2));
+
     const [total, phieuLes] = await Promise.all([
       PhieuLe.countDocuments(filter),
       PhieuLe.find(filter).sort({ ngay_import: -1 }).skip(skip).limit(limit),
@@ -339,27 +352,9 @@ exports.getAllPhieuLe = async (req, res) => {
       phieuLes.map((phieu) => populateKhoiLuongForPhieuLe(phieu)),
     );
 
-    // ✅ LOG: Kiểm tra virtual field
-    if (phieuLes.length > 0) {
-      console.log("\n🔍 === SAMPLE PHIẾU AFTER POPULATE ===");
-      console.log("  so_document:", phieuLes[0].so_document);
-      console.log("  tong_kien (virtual):", phieuLes[0].tong_kien);
-      console.log("  chi_tiet count:", phieuLes[0].chi_tiet?.length);
-
-      // ✅ Tính toán lại để verify
-      let verifyTotal = 0;
-      for (const item of phieuLes[0].chi_tiet) {
-        if (item.packs_to_pick_1 && item.packs_to_pick_1 > 0) {
-          verifyTotal += Math.ceil(item.packs_to_pick_1);
-        } else if (item.packs_to_pick && item.packs_to_pick > 0) {
-          verifyTotal += Math.ceil(item.packs_to_pick);
-        }
-      }
-      console.log("  tong_kien (verify):", verifyTotal);
-      console.log(
-        "  Khớp?",
-        verifyTotal === phieuLes[0].tong_kien ? "✅" : "❌",
-      );
+    console.log(`✅ Found ${total} phieus`);
+    if (printStartDate || printEndDate) {
+      console.log(`📊 Filtered by print date: ${phieuLes.length} results`);
     }
 
     res.status(200).json({
@@ -1811,7 +1806,7 @@ exports.updateMultipleChiTiet = async (req, res) => {
 
       if (
         typeof update.packs_to_pick_1 !== "number" ||
-        update.packs_to_pick_1 < 0  
+        update.packs_to_pick_1 < 0
       ) {
         return res.status(400).json({
           success: false,

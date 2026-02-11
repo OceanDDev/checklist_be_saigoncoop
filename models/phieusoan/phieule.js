@@ -39,7 +39,7 @@ const phieuLeSchema = new mongoose.Schema(
     tench: { type: String, default: "" },
     chuyen: { type: String, default: "" },
     ghi_chu_ch: { type: String, default: "" },
-    ngay_in_phieu: { type: Date, default: Date.now },
+    ngay_in_phieu: { type: Date, default: null },
     ngay_import: { type: Date, default: Date.now },
     ngay_cap_nhat: { type: Date, default: Date.now },
   },
