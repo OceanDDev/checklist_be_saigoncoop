@@ -33,7 +33,6 @@ const HEADER_MAP = {
   LOAIHINH: "loaiHinh",
   NGAY_IMPORT: "ngay_import",
   NGAY_NHAP: "ngay_import",
-  "NGAY NHAP": "ngay_import",
   NGAY_TAO: "ngay_import",
   LOAIHÌNH: "loaiHinh",
   MANCC: "maNCC",
