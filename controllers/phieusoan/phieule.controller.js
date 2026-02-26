@@ -5,6 +5,46 @@ const DinhVi = require("../../models/phieusoan/dinhvi");
 const fs = require("fs").promises;
 const path = require("path");
 
+// ===== HELPER - Map DataCH info by MACH (dùng cho Soda/WPK137) =====
+async function mapDataCHInfoByMach(mach, sd_tf = null) {
+  try {
+    const dataCH = await DataCH.findOne({
+      mach: { $regex: `^${mach}$`, $options: "i" },
+    });
+
+    if (dataCH) {
+      return {
+        sd_tf: sd_tf, // ✅ luôn lấy từ file WPK (SODA ORDER)
+        mach: mach, // ✅ luôn lấy từ file WPK (STORE)
+        tench: dataCH.tench, // lấy từ DataCH
+        quan: dataCH.quan, // lấy từ DataCH
+        chuyen: dataCH.chuyen, // lấy từ DataCH
+        ghi_chu_ch: dataCH.ghi_chu_ch || "",
+      };
+    }
+
+    // Không tìm thấy trong DataCH → vẫn lưu với mach + sd_tf từ file
+    console.warn(`⚠️ Không tìm thấy DataCH cho mach: ${mach}`);
+    return {
+      sd_tf: sd_tf,
+      mach: mach,
+      tench: "",  
+      quan: "",
+      chuyen: "",
+      ghi_chu_ch: "",
+    };
+  } catch (error) {
+    console.error(`❌ Lỗi mapDataCHInfoByMach cho mach ${mach}:`, error);
+    return {
+      sd_tf: sd_tf,
+      mach: mach,
+      tench: "",
+      quan: "",
+      chuyen: "",
+      ghi_chu_ch: "",
+    };
+  }
+}
 // ===== HELPER: Lấy pack từ DinhVi theo nhiều SKU =====
 async function getPackByMultipleSKU(skuList) {
   try {
@@ -240,6 +280,7 @@ exports.getAllPhieuLe = async (req, res) => {
       slot,
       trang_thai,
       mach,
+      loai_phieu,
       chuyen,
       quan,
       search,
@@ -253,6 +294,7 @@ exports.getAllPhieuLe = async (req, res) => {
 
     if (so_document) filter.so_document = parseInt(so_document);
     if (trang_thai) filter.trang_thai = trang_thai;
+    if (loai_phieu) filter.loai_phieu = loai_phieu;
     if (mach) filter.mach = { $regex: `^${mach}$`, $options: "i" };
     if (chuyen) filter.chuyen = { $regex: chuyen, $options: "i" };
     if (quan) {
@@ -620,11 +662,9 @@ exports.importTxtPhieuLe = async (req, res) => {
 
     if (!parsedData || !parsedData.so_document) {
       await fs.unlink(filePath).catch(console.error);
-      return res
-        .status(400)
-        .json({
-          message: "Format file txt không hợp lệ hoặc không có số document",
-        });
+      return res.status(400).json({
+        message: "Format file txt không hợp lệ hoặc không có số document",
+      });
     }
 
     const hasChiTiet =
@@ -641,6 +681,8 @@ exports.importTxtPhieuLe = async (req, res) => {
           update: {
             $set: {
               trang_thai: parsedData.trang_thai || "Chờ xử lý",
+              loai_phieu: parsedData.loai_phieu || "TF", // ✅ thêm dòng này
+
               ngay_cap_nhat: new Date(),
               ...dataCHInfo,
             },
@@ -699,6 +741,7 @@ exports.importTxtPhieuLe = async (req, res) => {
 
     const newPhieuLe = new PhieuLe({
       so_document: parsedData.so_document,
+      loai_phieu: parsedData.loai_phieu || "TF",
       chi_tiet: chiTietCopy,
       trang_thai: parsedData.trang_thai || "Chờ xử lý",
       ngay_import: new Date(),
@@ -851,6 +894,8 @@ exports.importTxtPhieuLeMultiple = async (req, res) => {
               update: {
                 $set: {
                   trang_thai: parsedData.trang_thai || "Chờ xử lý",
+                  loai_phieu: parsedData.loai_phieu || "TF", // ✅ thêm dòng này
+
                   ngay_cap_nhat: new Date(),
                   ...dataCHInfo,
                 },
@@ -891,6 +936,7 @@ exports.importTxtPhieuLeMultiple = async (req, res) => {
 
         const newPhieuLe = new PhieuLe({
           so_document: parsedData.so_document,
+          loai_phieu: parsedData.loai_phieu || "TF", // ✅ thêm dòng này
           chi_tiet: chiTietCopy,
           trang_thai: parsedData.trang_thai || "Chờ xử lý",
           ngay_import: new Date(),
@@ -1123,20 +1169,25 @@ function parseTxtContent(content) {
     let so_document = null;
     let sd_tf = null;
     const chi_tiet = [];
+    let loai_phieu = "TF"; // ✅ mặc định TF
 
     for (const line of lines) {
       const docMatch = line.match(/Document\s+No\.?:?\s*(\d+)/i);
       if (docMatch) {
         so_document = parseInt(docMatch[1]);
-
-        const sdTfMatch = line.match(/SD[\/]?TF:?\s*(\d+)/i);
-        if (sdTfMatch) {
-          sd_tf = parseInt(sdTfMatch[1]);
-        }
         break;
       }
     }
 
+    // ✅ Tìm SODA ORDER trong toàn bộ file
+    for (const line of lines) {
+      const sodaMatch = line.match(/SODA\s+ORDER\s*:\s*(\d+)/i);
+      if (sodaMatch) {
+        sd_tf = parseInt(sodaMatch[1]);
+        loai_phieu = "SD";
+        break;
+      }
+    }
     if (!so_document) {
       console.error("❌ Không tìm thấy Document No. trong file");
       return null;
@@ -1246,7 +1297,13 @@ function parseTxtContent(content) {
       }
     }
 
-    return { so_document, sd_tf, chi_tiet, trang_thai: "Chờ xử lý" };
+    return {
+      so_document,
+      sd_tf,
+      loai_phieu,
+      chi_tiet,
+      trang_thai: "Chờ xử lý",
+    };
   } catch (error) {
     console.error("❌ Parse txt error:", error);
     return null;
@@ -1310,11 +1367,9 @@ exports.updateManyPhieuLe = async (req, res) => {
     );
 
     if (result.matchedCount === 0) {
-      return res
-        .status(404)
-        .json({
-          message: "Không tìm thấy phiếu lẻ nào với các ID đã cung cấp",
-        });
+      return res.status(404).json({
+        message: "Không tìm thấy phiếu lẻ nào với các ID đã cung cấp",
+      });
     }
 
     res.status(200).json({
@@ -1331,12 +1386,10 @@ exports.updateManyPhieuLe = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Lỗi updateManyPhieuLe:", error);
-    res
-      .status(500)
-      .json({
-        message: "Lỗi khi cập nhật nhiều phiếu lẻ",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Lỗi khi cập nhật nhiều phiếu lẻ",
+      error: error.message,
+    });
   }
 };
 
@@ -1409,12 +1462,10 @@ exports.updateManyPhieuLeByFilter = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Lỗi updateManyPhieuLeByFilter:", error);
-    res
-      .status(500)
-      .json({
-        message: "Lỗi khi cập nhật nhiều phiếu lẻ theo filter",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Lỗi khi cập nhật nhiều phiếu lẻ theo filter",
+      error: error.message,
+    });
   }
 };
 
@@ -1470,12 +1521,10 @@ exports.updateChiTietPhieuLe = async (req, res) => {
     res.status(200).json({ message: "Cập nhật chi tiết phiếu lẻ thành công" });
   } catch (error) {
     console.error("❌ Lỗi updateChiTietPhieuLe:", error);
-    res
-      .status(500)
-      .json({
-        message: "Lỗi khi cập nhật chi tiết phiếu lẻ",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Lỗi khi cập nhật chi tiết phiếu lẻ",
+      error: error.message,
+    });
   }
 };
 
@@ -1485,21 +1534,17 @@ exports.updateTrangThaiBySDTF = async (req, res) => {
     const { sd_tf_list, trang_thai } = req.body;
 
     if (!sd_tf_list || !Array.isArray(sd_tf_list) || sd_tf_list.length === 0) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Danh sách SD/TF không hợp lệ hoặc rỗng!",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Danh sách SD/TF không hợp lệ hoặc rỗng!",
+      });
     }
 
     if (!trang_thai) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Vui lòng cung cấp trạng thái cần cập nhật!",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng cung cấp trạng thái cần cập nhật!",
+      });
     }
 
     const validStatuses = ["Chờ xử lý", "Đã xử lý", "Đã Xuất"];
@@ -1535,13 +1580,11 @@ exports.updateTrangThaiBySDTF = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Lỗi khi cập nhật trạng thái theo SD/TF:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Có lỗi xảy ra khi cập nhật trạng thái!",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Có lỗi xảy ra khi cập nhật trạng thái!",
+      error: error.message,
+    });
   }
 };
 
@@ -1676,20 +1719,16 @@ exports.getPackUnit1Info = async (req, res) => {
       }
     });
 
-    res
-      .status(200)
-      .json({
-        message: "✅ Lấy thông tin pack_unit_1 thành công",
-        data: packInfo,
-      });
+    res.status(200).json({
+      message: "✅ Lấy thông tin pack_unit_1 thành công",
+      data: packInfo,
+    });
   } catch (error) {
     console.error("❌ Lỗi getPackUnit1Info:", error);
-    res
-      .status(500)
-      .json({
-        message: "Lỗi khi lấy thông tin pack_unit_1",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Lỗi khi lấy thông tin pack_unit_1",
+      error: error.message,
+    });
   }
 };
 
@@ -1700,22 +1739,18 @@ exports.updateMultipleChiTiet = async (req, res) => {
     const { updates } = req.body;
 
     if (!updates || !Array.isArray(updates) || updates.length === 0) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Updates array is required and must not be empty",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Updates array is required and must not be empty",
+      });
     }
 
     for (const update of updates) {
       if (!update.sku || update.packs_to_pick_1 === undefined) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Each update must have: sku, packs_to_pick_1",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Each update must have: sku, packs_to_pick_1",
+        });
       }
 
       if (
@@ -1733,13 +1768,439 @@ exports.updateMultipleChiTiet = async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error("❌ Error in updateMultipleChiTiet controller:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: error.message || "Internal server error",
-      });
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
   }
 };
 
+exports.migrateLoaiPhieu = async (req, res) => {
+  try {
+    const result = await PhieuLe.updateMany(
+      { loai_phieu: { $exists: false } },
+      { $set: { loai_phieu: "TF" } },
+    );
 
+    res.status(200).json({
+      message: `✅ Đã migrate ${result.modifiedCount} phiếu`,
+      modified: result.modifiedCount,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Lỗi migrate", error: error.message });
+  }
+};
+
+// ===== PARSE WPK TXT CONTENT (Soda format) =====
+function parseWpkTxtContent(content) {
+  try {
+    const lines = content.split("\n");
+
+    let so_document = null;
+    let sd_tf = null;
+    let mach_from_file = null;
+    const chi_tiet = [];
+
+    // Tìm Document No
+    for (const line of lines) {
+      const docMatch = line.match(/Document\s+No\.?:?\s*(\d+)/i);
+      if (docMatch) {
+        so_document = parseInt(docMatch[1]);
+        break;
+      }
+    }
+
+    // Tìm SODA ORDER + STORE (lấy dòng đầu tiên)
+    for (const line of lines) {
+      const sodaMatch = line.match(/SODA\s+ORDER\s*:\s*(\d+)/i);
+      if (sodaMatch) {
+        sd_tf = parseInt(sodaMatch[1]);
+        const storeMatch = line.match(/STORE:\s*(\S+)/i);
+        if (storeMatch) {
+          mach_from_file = storeMatch[1]; // "CH00296"
+        }
+        break;
+      }
+    }
+
+    if (!so_document) {
+      console.error("❌ Không tìm thấy Document No. trong file WPK");
+      return null;
+    }
+
+    let startParsing = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // WPK dùng ===== để bắt đầu data
+      if (line.includes("=====")) {
+        startParsing = true;
+        continue;
+      }
+
+      if (line.includes("END OF REPORT")) break;
+
+      // Skip các dòng header và SODA ORDER
+      if (
+        !startParsing ||
+        line.includes("WPK137") ||
+        line.includes("Customer Order Picking") ||
+        line.includes("Warehouse") ||
+        line.includes("Packing Slot") ||
+        line.includes("Move") ||
+        line.includes("SODA ORDER") ||
+        line.includes("Seq") ||
+        line.includes("Clerk:") ||
+        line.includes("JDA Software") ||
+        line.trim() === ""
+      ) {
+        continue;
+      }
+
+      const trimmed = line.trim();
+      if (!trimmed || !/^\d+\s/.test(trimmed)) continue;
+
+      try {
+        const parts = trimmed.split(/\s+/);
+        if (parts.length < 12) continue;
+
+        // WPK format: move_seq internal_order order_seq slot sku vendor desc... qty pack_unit pck_um packs_to_pick each_unit each_um eaches_to_pick store
+        // parts[0] = move_seq (1,2,3...)
+        // parts[1] = internal_order (588907)
+        // parts[2] = order_seq (110, 20, 90...)
+        // parts[3] = slot (A01203)
+        // parts[4] = sku (3565459)
+        // parts[5] = vendor (21898)
+        // parts[6..N] = description
+        // parts[N+1] = quantity (5.00)
+        // parts[N+2] = pack_unit (1)
+        // parts[N+3] = pck_um (EA)
+        // parts[N+4] = packs_to_pick (5.00)
+        // parts[N+5] = each_unit (1)
+        // parts[N+6] = each_um (EA)
+        // parts[N+7] = eaches_to_pick (.00)
+        // parts[N+8] = store (810)
+
+        const move_seq = parseInt(parts[0]);
+        const internal_order = parseInt(parts[1]);
+        const order_seq = parseInt(parts[2]);
+        const slot = parts[3];
+        const sku = parseInt(parts[4]);
+        const vendor = parseInt(parts[5]);
+
+        if (isNaN(move_seq) || isNaN(sku) || isNaN(vendor)) continue;
+
+        // Tìm quantity index (số có dạng X.XX)
+        let quantityIndex = -1;
+        for (let j = 6; j < parts.length - 7; j++) {
+          if (/^\d+\.\d{2}$/.test(parts[j])) {
+            const val = parseFloat(parts[j]);
+            if (!isNaN(val) && val >= 0) {
+              quantityIndex = j;
+              break;
+            }
+          }
+        }
+
+        if (quantityIndex === -1) continue;
+
+        const descParts = parts.slice(6, quantityIndex);
+        const description = descParts.join(" ").trim();
+        if (!description) continue;
+
+        const quantity = parseFloat(parts[quantityIndex]);
+        const pack_unit = parseInt(parts[quantityIndex + 1]);
+        const pck_um = parts[quantityIndex + 2];
+        const packs_to_pick = parseFloat(parts[quantityIndex + 3]);
+        const store = parseInt(parts[quantityIndex + 7]);
+
+        if (
+          isNaN(quantity) ||
+          isNaN(pack_unit) ||
+          isNaN(packs_to_pick) ||
+          isNaN(store)
+        ) {
+          continue;
+        }
+
+        chi_tiet.push({
+          seq: move_seq,
+          slot,
+          sku,
+          vendor,
+          part_number: null,
+          name: description,
+          quantity,
+          khoi_luong: null,
+          pack_unit,
+          pck_um,
+          packs_to_pick,
+          store,
+          internal_order,
+          order_seq,
+        });
+      } catch (err) {
+        console.error(`⚠️ Lỗi parse dòng WPK ${i}:`, err.message);
+        continue;
+      }
+    }
+
+    return {
+      so_document,
+      sd_tf,
+      loai_phieu: "SD",
+      mach_from_file,
+      chi_tiet,
+      trang_thai: "Chờ xử lý",
+    };
+  } catch (error) {
+    console.error("❌ Parse WPK txt error:", error);
+    return null;
+  }
+}
+
+// ===== IMPORT SODA TXT - Import 1 file WPK137 =====
+exports.importSodaTxtPhieuLe = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "Không có file được upload" });
+    }
+
+    const filePath = req.file.path;
+    const fileBuffer = await fs.readFile(filePath);
+
+    let fileContent;
+    if (
+      fileBuffer[0] === 0xef &&
+      fileBuffer[1] === 0xbb &&
+      fileBuffer[2] === 0xbf
+    ) {
+      fileContent = fileBuffer.slice(3).toString("utf-8");
+    } else if (fileBuffer[0] === 0xff && fileBuffer[1] === 0xfe) {
+      fileContent = fileBuffer.slice(2).toString("utf16le");
+    } else if (fileBuffer[0] === 0xfe && fileBuffer[1] === 0xff) {
+      fileContent = fileBuffer.slice(2).toString("utf16le");
+    } else {
+      fileContent = fileBuffer.toString("utf-8");
+    }
+
+    fileContent = fileContent.replace(/^[\x00-\x1F\uFEFF\uFFFE]+/, "");
+
+    const parsedData = parseWpkTxtContent(fileContent);
+
+    if (!parsedData || !parsedData.so_document) {
+      await fs.unlink(filePath).catch(console.error);
+      return res.status(400).json({
+        message: "Format file WPK không hợp lệ hoặc không có số document",
+      });
+    }
+
+    if (!parsedData.mach_from_file) {
+      await fs.unlink(filePath).catch(console.error);
+      return res.status(400).json({
+        message: "Không tìm thấy mã cửa hàng (STORE) trong file WPK",
+      });
+    }
+
+    // Kiểm tra trùng
+    const existing = await PhieuLe.findOne({
+      so_document: parsedData.so_document,
+    });
+    if (existing) {
+      await fs.unlink(filePath).catch(console.error);
+      return res.status(409).json({
+        message: `Số document ${parsedData.so_document} đã tồn tại`,
+        so_document: parsedData.so_document,
+        existing_id: existing._id,
+      });
+    }
+
+    // ✅ Map DataCH theo mach thay vì so_document
+    const dataCHInfo = await mapDataCHInfoByMach(
+      parsedData.mach_from_file,
+      parsedData.sd_tf,
+    );
+
+    const chiTietCopy = parsedData.chi_tiet.map((item) => ({ ...item }));
+    const tong_kien = await populatePacksToPick1AndTongKien(chiTietCopy);
+
+    const newPhieuLe = new PhieuLe({
+      so_document: parsedData.so_document,
+      loai_phieu: "SD",
+      chi_tiet: chiTietCopy,
+      trang_thai: "Chờ xử lý",
+      ngay_import: new Date(),
+      tong_kien,
+      ...dataCHInfo,
+    });
+
+    await newPhieuLe.save();
+    await fs.unlink(filePath).catch(console.error);
+
+    res.status(201).json({
+      message: "✅ Import file Soda (WPK137) thành công",
+      filename: req.file.originalname,
+      so_document: parsedData.so_document,
+      sd_tf: parsedData.sd_tf,
+      mach: dataCHInfo.mach,
+      tench: dataCHInfo.tench,
+      total_items: chiTietCopy.length,
+      tong_kien,
+    });
+  } catch (error) {
+    if (req.file) await fs.unlink(req.file.path).catch(console.error);
+    console.error("❌ Lỗi importSodaTxtPhieuLe:", error);
+
+    if (error.code === 11000) {
+      const duplicateDoc = error.keyValue?.so_document;
+      return res.status(409).json({
+        message: `Số document ${duplicateDoc} đã tồn tại`,
+        so_document: duplicateDoc,
+      });
+    }
+
+    res
+      .status(500)
+      .json({ message: "Lỗi khi import file Soda", error: error.message });
+  }
+};
+
+// ===== IMPORT SODA TXT MULTIPLE =====
+exports.importSodaTxtPhieuLeMultiple = async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: "Không có file được upload" });
+    }
+
+    const results = {
+      success: 0,
+      failed: 0,
+      inserted: 0,
+      total_items: 0,
+      errors: [],
+      duplicates: [],
+    };
+
+    const parsedDataList = [];
+
+    for (const file of req.files) {
+      try {
+        const fileBuffer = await fs.readFile(file.path);
+        let fileContent;
+        if (
+          fileBuffer[0] === 0xef &&
+          fileBuffer[1] === 0xbb &&
+          fileBuffer[2] === 0xbf
+        ) {
+          fileContent = fileBuffer.slice(3).toString("utf-8");
+        } else if (fileBuffer[0] === 0xff && fileBuffer[1] === 0xfe) {
+          fileContent = fileBuffer.slice(2).toString("utf16le");
+        } else {
+          fileContent = fileBuffer.toString("utf-8");
+        }
+        fileContent = fileContent.replace(/^[\x00-\x1F\uFEFF\uFFFE]+/, "");
+
+        const parsedData = parseWpkTxtContent(fileContent);
+        if (parsedData && parsedData.so_document && parsedData.mach_from_file) {
+          parsedDataList.push({ file, parsedData });
+        } else {
+          results.failed++;
+          results.errors.push(
+            `${file.originalname}: Format WPK không hợp lệ hoặc thiếu STORE`,
+          );
+          await fs.unlink(file.path).catch(console.error);
+        }
+      } catch (err) {
+        results.failed++;
+        results.errors.push(`${file.originalname}: ${err.message}`);
+        await fs.unlink(file.path).catch(console.error);
+      }
+    }
+
+    // Kiểm tra trùng
+    const soDocuments = parsedDataList.map(
+      (item) => item.parsedData.so_document,
+    );
+    const existingDocs = await PhieuLe.find(
+      { so_document: { $in: soDocuments } },
+      { so_document: 1 },
+    ).lean();
+    const existingSet = new Set(existingDocs.map((d) => d.so_document));
+
+    for (const { file, parsedData } of parsedDataList) {
+      try {
+        if (existingSet.has(parsedData.so_document)) {
+          results.failed++;
+          results.duplicates.push({
+            fileName: file.originalname,
+            soDocument: parsedData.so_document,
+            message: `Số document ${parsedData.so_document} đã tồn tại`,
+          });
+          await fs.unlink(file.path).catch(console.error);
+          continue;
+        }
+
+        // ✅ Map DataCH theo mach
+        const dataCHInfo = await mapDataCHInfoByMach(
+          parsedData.mach_from_file,
+          parsedData.sd_tf,
+        );
+
+        const chiTietCopy = parsedData.chi_tiet.map((item) => ({ ...item }));
+        const tong_kien = await populatePacksToPick1AndTongKien(chiTietCopy);
+
+        const newPhieuLe = new PhieuLe({
+          so_document: parsedData.so_document,
+          loai_phieu: "SD",
+          chi_tiet: chiTietCopy,
+          trang_thai: "Chờ xử lý",
+          ngay_import: new Date(),
+          tong_kien,
+          ...dataCHInfo,
+        });
+
+        await newPhieuLe.save();
+        results.success++;
+        results.inserted++;
+        results.total_items += chiTietCopy.length;
+        await fs.unlink(file.path).catch(console.error);
+      } catch (err) {
+        results.failed++;
+        if (err.code === 11000) {
+          results.duplicates.push({
+            fileName: file.originalname,
+            soDocument: parsedData.so_document,
+            message: `Số document ${parsedData.so_document} đã tồn tại`,
+          });
+        } else {
+          results.errors.push(`${file.originalname}: ${err.message}`);
+        }
+        await fs.unlink(file.path).catch(console.error);
+      }
+    }
+
+    res.status(results.failed === 0 ? 201 : 207).json({
+      message: `✅ Import Soda hoàn tất. Thành công: ${results.success}/${req.files.length}`,
+      stats: {
+        total_files: req.files.length,
+        success: results.success,
+        failed: results.failed,
+        inserted: results.inserted,
+        total_items: results.total_items,
+      },
+      duplicates: results.duplicates,
+      errors: results.errors,
+    });
+  } catch (error) {
+    if (req.files) {
+      for (const file of req.files)
+        await fs.unlink(file.path).catch(console.error);
+    }
+    console.error("❌ Lỗi importSodaTxtPhieuLeMultiple:", error);
+    res.status(500).json({
+      message: "Lỗi khi import nhiều file Soda",
+      error: error.message,
+    });
+  }
+};

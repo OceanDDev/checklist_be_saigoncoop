@@ -31,7 +31,11 @@ const phieuLeSchema = new mongoose.Schema(
       default: "Chờ xử lý",
     },
     ghi_chu_phieu: { type: String, default: "" },
-
+    loai_phieu: {
+      type: String,
+      enum: ["SD", "TF"],
+      default: "TF", // ✅ Mặc định TF nếu không có SODA ORDER
+    },
     // ===== FIELDS FROM DataCH =====
     sd_tf: { type: Number, default: null },
     mach: { type: String, default: "" },

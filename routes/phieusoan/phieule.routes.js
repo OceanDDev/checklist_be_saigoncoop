@@ -25,6 +25,9 @@ const upload = multer({
 });
 
 // ===== PHIẾU LẺ ROUTES =====
+router.get("/phieule/migrate-loai-phieu",phieuLeController.migrateLoaiPhieu);
+router.post("/phieule/import-soda-txt", upload.single("file"), phieuLeController.importSodaTxtPhieuLe);
+router.post("/phieule/import-soda-txt-multiple", upload.array("files", 50), phieuLeController.importSodaTxtPhieuLeMultiple);
 router.get("/phieule", phieuLeController.getAllPhieuLe);
 router.get("/phieule/statistics", phieuLeController.getPhieuLeStatistics);
 router.get("/phieule/document/:so_document", phieuLeController.getPhieuLeBySoDocument);
@@ -51,5 +54,6 @@ router.post("/dataCH", dataCHController.addDataCH);
 router.post("/dataCH/addmany", dataCHController.importManyDataCH);
 router.put("/dataCH/:id", dataCHController.updateDataCH);
 router.delete("/dataCH/:id", dataCHController.deleteDataCH);
+
 
 module.exports = router;
