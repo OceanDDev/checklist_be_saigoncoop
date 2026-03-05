@@ -3,43 +3,61 @@ const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const path = require("path");
+const http = require("http");
+const { Server } = require("socket.io");
+const { startQrRotation } = require("./controllers/chamcong/qr.controller");
 
 dotenv.config();
 const app = express();
+const server = http.createServer(app); // ← wrap app vào http server
 const PORT = process.env.PORT || 5000;
 
-// ✅ Khai báo allowedOrigins trước khi dùng
 const allowedOrigins = process.env.CORS_ORIGINS?.split(",") || [];
 
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
+// ── CORS cho Express ──────────────────────────────────────────────────────────
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+  }),
+);
+
+// ── Socket.IO ─────────────────────────────────────────────────────────────────
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins.length ? allowedOrigins : "*",
+    methods: ["GET", "POST"],
   },
-  credentials: true,
-}));
+});
 
-// ✅ Middleware xử lý JSON & form - THÊM LIMIT Ở ĐÂY
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+io.on("connection", (socket) => {
+  console.log("🔌 Socket connected:", socket.id);
+  socket.on("disconnect", () => {
+    console.log("🔌 Socket disconnected:", socket.id);
+  });
+});
 
-// 🆕 Serve static files từ thư mục uploads
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-console.log("📁 Static files served from:", path.join(__dirname, 'uploads'));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-// ✅ (Optional) Middleware log request size để debug
 app.use((req, res, next) => {
   if (req.body && Object.keys(req.body).length > 0) {
     const size = JSON.stringify(req.body).length;
-    console.log(`📦 Request size: ${(size / 1024).toFixed(2)} KB - Path: ${req.path}`);
+    console.log(
+      `📦 Request size: ${(size / 1024).toFixed(2)} KB - Path: ${req.path}`,
+    );
   }
   next();
 });
 
-// ✅ Routes
+// ── Routes ────────────────────────────────────────────────────────────────────
 const userRoutes = require("./routes/users/user.routes");
 const checklistRoutes = require("./routes/checklist/checklist.routes");
 const authRoutes = require("./routes/auth/auth.routes");
@@ -54,11 +72,11 @@ const checkKpiStaff = require("./routes/checkkpistaff/checkkpistaff.routes");
 const formKpiStaff = require("./routes/formkpistaff/formkpistaff.routes");
 const xuatTraRoutes = require("./routes/dieuvan/xuattra/xuattra.routes.js");
 const phieuSoanRoutes = require("./routes/phieusoan/phieusoan.routes.js");
-const phuXeRoutes = require("./routes/phuxe/phuxe.routes.js");  
-const TbbRoutes = require("./routes/ttb/ttb.routes.js");  
-const ThietBiRoutes = require("./routes/ttb/ttb.routes.js");  
-const PhieuLeRoutes = require("./routes/phieusoan/phieule.routes.js")
-const ChamCongRoutes = require("./routes/chamcong/chamcong.routes.js")
+const phuXeRoutes = require("./routes/phuxe/phuxe.routes.js");
+const TbbRoutes = require("./routes/ttb/ttb.routes.js");
+const ThietBiRoutes = require("./routes/ttb/ttb.routes.js");
+const PhieuLeRoutes = require("./routes/phieusoan/phieule.routes.js");
+const ChamCongRoutes = require("./routes/chamcong/chamcong.routes.js");
 
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
@@ -78,16 +96,18 @@ app.use("/api/saigoncoop", phuXeRoutes);
 app.use("/api/saigoncoop", TbbRoutes);
 app.use("/api/saigoncoop", ThietBiRoutes);
 app.use("/api/saigoncoop", PhieuLeRoutes);
+app.use("/api/saigoncoop", ChamCongRoutes);
 
-
-
-// ✅ Kết nối MongoDB
+// ── Kết nối MongoDB rồi mới start server ─────────────────────────────────────
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {
     console.log("✅ Connected to MongoDB");
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
+      // ← server.listen thay vì app.listen
       console.log(`🚀 Server running on port ${PORT}`);
+      startQrRotation(io); // ← khởi động QR rotation sau khi server ready
+      console.log("📱 QR rotation started");
     });
   })
   .catch((err) => console.error("❌ MongoDB connection error:", err));
