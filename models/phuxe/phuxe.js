@@ -13,7 +13,7 @@ const phuXeSchema = new mongoose.Schema(
       type: String,
       required: false,
       // Ghi chú: Tên cửa hàng được phục vụ
-    },
+    },  
     ma_cua_hang: {
       type: String,
       required: false,
