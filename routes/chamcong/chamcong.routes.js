@@ -9,20 +9,27 @@ router.get("/chamcong/qr/current", qrController.getCurrentQr);
 router.post(
   "/chamcong/check-qr",
   qrController.kiemTraQrToken,
-  chamCongController.kiemTraGPS, // ✅ thêm lại
+  chamCongController.kiemTraGPS,
   chamCongController.kiemTraNhanVien,
+  chamCongController.kiemTraDeviceId, // ✅ thêm: chống chấm hộ qua QR
   chamCongController.chamCong,
 );
+router.get("/chamcong/qr/validate", qrController.validateQrToken);
 
 // ── Chấm công ─────────────────────────────────────────────────────────────────
 router.post(
   "/chamcong/check",
   chamCongController.kiemTraGPS,
   chamCongController.kiemTraNhanVien,
+  chamCongController.kiemTraDeviceId, // ✅ thêm: chống chấm hộ thường
   chamCongController.chamCong,
 );
+router.post("/chamcong/admin-add",chamCongController.adminAddChamCong);
+router.post("/chamcong/import-nang-suat", chamCongController.importNangSuat);
 
-// ✅ Route tĩnh trước route động 
+// ✅ Route tĩnh trước route động
+router.post("/chamcong/admin-add",chamCongController.adminAddChamCong);
+router.patch("/chamcong/:id/admin-edit",chamCongController.adminEditChamCong);
 router.get("/chamcong/trang-thai-hom-nay", chamCongController.trangThaiHomNay);
 router.post("/chamcong/delete-many", chamCongController.deleteManyChamCong);
 router.get("/chamcong", chamCongController.getDanhSach);
