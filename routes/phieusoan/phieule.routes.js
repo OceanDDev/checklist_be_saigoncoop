@@ -4,6 +4,7 @@ const multer = require("multer");
 const path = require("path");
 const phieuLeController = require("../../controllers/phieusoan/phieule.controller");
 const dataCHController = require("../../controllers/phieusoan/dataCH.controller");
+const { verifyToken } = require("../../middlewares/authMiddleware");
 
 // ===== MULTER CONFIG =====
 const upload = multer({
@@ -21,39 +22,37 @@ const upload = multer({
       ? cb(null, true)
       : cb(new Error("Chỉ cho phép .txt"), false);
   },
-  limits: { fileSize: 10 * 1024 * 1024 }, // max 10MB
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
 // ===== PHIẾU LẺ ROUTES =====
-router.get("/phieule/migrate-loai-phieu",phieuLeController.migrateLoaiPhieu);
-router.post("/phieule/import-soda-txt", upload.single("file"), phieuLeController.importSodaTxtPhieuLe);
-router.post("/phieule/import-soda-txt-multiple", upload.array("files", 50), phieuLeController.importSodaTxtPhieuLeMultiple);
-router.get("/phieule", phieuLeController.getAllPhieuLe);
-router.get("/phieule/statistics", phieuLeController.getPhieuLeStatistics);
-router.get("/phieule/document/:so_document", phieuLeController.getPhieuLeBySoDocument);
-router.get("/phieule/:id", phieuLeController.getPhieuLeById);
-router.post("/phieule", phieuLeController.createPhieuLe);
-router.post("/phieule/import", phieuLeController.importManyPhieuLe);
-router.post("/phieule/import-txt", upload.single("file"), phieuLeController.importTxtPhieuLe);
-router.post("/phieule/import-txt-multiple", upload.array("files", 50), phieuLeController.importTxtPhieuLeMultiple);
-router.post("/phieule/clear-all", phieuLeController.clearAllPhieuLe);
-router.put("/phieule/update-by-sdtf", phieuLeController.updateTrangThaiBySDTF);
-
-router.patch('/phieule/:id/chi-tiet/bulk-update', phieuLeController.updateMultipleChiTiet);
-router.put('/phieule/:id/chitiet', phieuLeController.updateChiTietPhieuLe);
-router.put("/phieule/update-many",phieuLeController.updateManyPhieuLe);
-router.put("/phieule/:id", phieuLeController.updatePhieuLe);
-router.put("/phieule/:id/status", phieuLeController.updatePhieuLeStatus);
-router.delete("/phieule/:id", phieuLeController.deletePhieuLe);
+router.get("/phieule/migrate-loai-phieu", verifyToken, phieuLeController.migrateLoaiPhieu);
+router.post("/phieule/import-soda-txt", verifyToken, upload.single("file"), phieuLeController.importSodaTxtPhieuLe);
+router.post("/phieule/import-soda-txt-multiple", verifyToken, upload.array("files", 50), phieuLeController.importSodaTxtPhieuLeMultiple);
+router.get("/phieule", verifyToken, phieuLeController.getAllPhieuLe);
+router.get("/phieule/statistics", verifyToken, phieuLeController.getPhieuLeStatistics);
+router.get("/phieule/document/:so_document", verifyToken, phieuLeController.getPhieuLeBySoDocument);
+router.get("/phieule/:id", verifyToken, phieuLeController.getPhieuLeById);
+router.post("/phieule", verifyToken, phieuLeController.createPhieuLe);
+router.post("/phieule/import", verifyToken, phieuLeController.importManyPhieuLe);
+router.post("/phieule/import-txt", verifyToken, upload.single("file"), phieuLeController.importTxtPhieuLe);
+router.post("/phieule/import-txt-multiple", verifyToken, upload.array("files", 50), phieuLeController.importTxtPhieuLeMultiple);
+router.post("/phieule/clear-all", verifyToken, phieuLeController.clearAllPhieuLe);
+router.put("/phieule/update-by-sdtf", verifyToken, phieuLeController.updateTrangThaiBySDTF);
+router.patch("/phieule/:id/chi-tiet/bulk-update", verifyToken, phieuLeController.updateMultipleChiTiet);
+router.put("/phieule/:id/chitiet", verifyToken, phieuLeController.updateChiTietPhieuLe);
+router.put("/phieule/update-many", verifyToken, phieuLeController.updateManyPhieuLe);
+router.put("/phieule/:id", verifyToken, phieuLeController.updatePhieuLe);
+router.put("/phieule/:id/status", verifyToken, phieuLeController.updatePhieuLeStatus);
+router.delete("/phieule/:id", verifyToken, phieuLeController.deletePhieuLe);
 
 // ===== DATA CỬA HÀNG ROUTES =====
-router.delete("/dataCH/delete-all", dataCHController.deleteAllDataCH);
-router.get("/dataCH", dataCHController.getAllDataCH);
-router.get("/dataCH/:id", dataCHController.getDataCHById);
-router.post("/dataCH", dataCHController.addDataCH);
-router.post("/dataCH/addmany", dataCHController.importManyDataCH);
-router.put("/dataCH/:id", dataCHController.updateDataCH);
-router.delete("/dataCH/:id", dataCHController.deleteDataCH);
-
+router.delete("/dataCH/delete-all", verifyToken, dataCHController.deleteAllDataCH);
+router.get("/dataCH", verifyToken, dataCHController.getAllDataCH);
+router.get("/dataCH/:id", verifyToken, dataCHController.getDataCHById);
+router.post("/dataCH", verifyToken, dataCHController.addDataCH);
+router.post("/dataCH/addmany", verifyToken, dataCHController.importManyDataCH);
+router.put("/dataCH/:id", verifyToken, dataCHController.updateDataCH);
+router.delete("/dataCH/:id", verifyToken, dataCHController.deleteDataCH);
 
 module.exports = router;
