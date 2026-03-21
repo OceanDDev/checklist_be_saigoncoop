@@ -77,6 +77,8 @@ const TbbRoutes = require("./routes/ttb/ttb.routes.js");
 const ThietBiRoutes = require("./routes/ttb/ttb.routes.js");
 const PhieuLeRoutes = require("./routes/phieusoan/phieule.routes.js");
 const ChamCongRoutes = require("./routes/chamcong/chamcong.routes.js");
+const NangSuatRoutes = require("./routes/nangsuat/nangsuat.routes.js");
+
 
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
@@ -97,6 +99,8 @@ app.use("/api/saigoncoop", TbbRoutes);
 app.use("/api/saigoncoop", ThietBiRoutes);
 app.use("/api/saigoncoop", PhieuLeRoutes);
 app.use("/api/saigoncoop", ChamCongRoutes);
+app.use("/api/saigoncoop", NangSuatRoutes);
+
 
 // ── Kết nối MongoDB rồi mới start server ─────────────────────────────────────
 mongoose
