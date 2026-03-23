@@ -28,7 +28,7 @@ async function mapDataCHInfoByMach(mach, sd_tf = null) {
     return {
       sd_tf: sd_tf,
       mach: mach,
-      tench: "",  
+      tench: "",
       quan: "",
       chuyen: "",
       ghi_chu_ch: "",
@@ -2202,5 +2202,64 @@ exports.importSodaTxtPhieuLeMultiple = async (req, res) => {
       message: "Lỗi khi import nhiều file Soda",
       error: error.message,
     });
+  }
+};
+
+exports.import8101PhieuLe = async (req, res) => {
+  try {
+    const {
+      chi_tiet,
+      sd_tf,
+      mach,
+      tench,
+      quan,
+      chuyen,
+      ghi_chu_ch,
+      trang_thai,
+    } = req.body;
+
+    if (!Array.isArray(chi_tiet) || chi_tiet.length === 0) {
+      return res.status(400).json({ message: "chi_tiet không được rỗng" });
+    }
+
+    // Chỉ check trùng sd_tf
+    if (sd_tf) {
+      const existingSdTf = await PhieuLe.findOne({ sd_tf, loai_phieu: "8101" });
+      if (existingSdTf) {
+        return res.status(409).json({
+          message: `SD/TF ${sd_tf} đã tồn tại trong phiếu 8101`,
+          sd_tf,
+          existing_id: existingSdTf._id,
+        });
+      }
+    }
+
+    const newPhieuLe = new PhieuLe({
+      loai_phieu: "8101",
+      chi_tiet,
+      trang_thai: trang_thai || "Chờ xử lý",
+      ngay_import: new Date(),
+      sd_tf: sd_tf ?? null,
+      mach: mach ?? "",
+      tench: tench ?? "",
+      quan: quan ?? "",
+      chuyen: chuyen ?? "",
+      ghi_chu_ch: ghi_chu_ch ?? "",
+    });
+
+    await newPhieuLe.save();
+
+    res.status(201).json({
+      message: "✅ Import 8101 thành công",
+      sd_tf,
+      mach,
+      tench,
+      total_items: chi_tiet.length,
+    });
+  } catch (error) {
+    console.error("❌ Lỗi import8101PhieuLe:", error);
+    res
+      .status(500)
+      .json({ message: "Lỗi khi import 8101", error: error.message });
   }
 };

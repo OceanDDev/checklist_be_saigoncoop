@@ -27,6 +27,7 @@ const upload = multer({
 
 // ===== PHIẾU LẺ ROUTES =====
 router.get("/phieule/migrate-loai-phieu", verifyToken, phieuLeController.migrateLoaiPhieu);
+router.post("/phieule/import-8101", verifyToken,phieuLeController.import8101PhieuLe);
 router.post("/phieule/import-soda-txt", verifyToken, upload.single("file"), phieuLeController.importSodaTxtPhieuLe);
 router.post("/phieule/import-soda-txt-multiple", verifyToken, upload.array("files", 50), phieuLeController.importSodaTxtPhieuLeMultiple);
 router.get("/phieule", verifyToken, phieuLeController.getAllPhieuLe);

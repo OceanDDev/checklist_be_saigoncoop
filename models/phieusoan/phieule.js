@@ -2,18 +2,18 @@ const mongoose = require("mongoose");
 
 const chiTietPhieuLeSchema = new mongoose.Schema(
   {
-    seq: { type: Number, required: true },
-    slot: { type: String, required: true },
+    seq: { type: Number, default: 0 },
+    slot: { type: String, default: "" }, // ✅ bỏ required — 8101 không có slot
     sku: { type: Number, required: true },
-    vendor: { type: Number, required: true },
+    vendor: { type: Number, default: 0 }, // ✅ bỏ required — 8101 không có vendor
     part_number: { type: String, default: null },
     name: { type: String, required: true },
     quantity: { type: Number, required: true },
-    pack_unit: { type: Number, required: true },
-    pck_um: { type: String, required: true },
-    packs_to_pick: { type: Number, required: true },
-    store: { type: Number, required: true },
-    khoi_luong: { type: Number, default: 0 }, // ✅ SỬA: Number thay vì String
+    pack_unit: { type: Number, default: 1 }, // ✅ bỏ required — 8101 mặc định 1
+    pck_um: { type: String, default: "EA" }, // ✅ bỏ required — 8101 mặc định EA
+    packs_to_pick: { type: Number, default: 0 }, // ✅ bỏ required — 8101 tính từ quantity
+    store: { type: Number, default: 0 }, // ✅ bỏ required — 8101 không có store
+    khoi_luong: { type: Number, default: 0 },
     pack_unit_1: { type: Number, default: null },
     packs_to_pick_1: { type: Number, default: null },
   },
@@ -22,7 +22,11 @@ const chiTietPhieuLeSchema = new mongoose.Schema(
 
 const phieuLeSchema = new mongoose.Schema(
   {
-    so_document: { type: Number, required: true, unique: true },
+    so_document: {
+      type: Number,
+      default: null,
+      sparse: true, // ← cho phép nhiều document có so_document = null
+    },
     chi_tiet: [chiTietPhieuLeSchema],
     so_lan_in_phieu: { type: Number, default: 0 },
     trang_thai: {
@@ -33,8 +37,8 @@ const phieuLeSchema = new mongoose.Schema(
     ghi_chu_phieu: { type: String, default: "" },
     loai_phieu: {
       type: String,
-      enum: ["SD", "TF"],
-      default: "TF", // ✅ Mặc định TF nếu không có SODA ORDER
+      enum: ["SD", "TF", "8101"],
+      default: "TF",
     },
     // ===== FIELDS FROM DataCH =====
     sd_tf: { type: Number, default: null },
@@ -54,42 +58,35 @@ const phieuLeSchema = new mongoose.Schema(
   },
 );
 
-// ✅ Virtual field: Tổng kiện
+// Virtual field: Tổng kiện
 phieuLeSchema.virtual("tong_kien").get(function () {
   if (!this.chi_tiet || this.chi_tiet.length === 0) return 0;
 
-  let total = 0; // ✅ Giữ số thập phân
+  let total = 0;
 
   for (const item of this.chi_tiet) {
-    // ✅ ƯU TIÊN: packs_to_pick_1 nếu có giá trị > 0
     if (item.packs_to_pick_1 && item.packs_to_pick_1 > 0) {
-      total += item.packs_to_pick_1; // ✅ CỘNG TRỰC TIẾP, KHÔNG LÀM TRÒN
-    }
-    // ✅ FALLBACK: Dùng packs_to_pick
-    else if (item.packs_to_pick && item.packs_to_pick > 0) {
-      total += item.packs_to_pick; // ✅ CỘNG TRỰC TIẾP, KHÔNG LÀM TRÒN
+      total += item.packs_to_pick_1;
+    } else if (item.packs_to_pick && item.packs_to_pick > 0) {
+      total += item.packs_to_pick;
     }
   }
 
-  // ✅ LÀM TRÒN LÊN MỘT LẦN DUY NHẤT Ở CUỐI
   return Math.ceil(total);
 });
 
-// ✅ NEW: Virtual field - Tổng khối lượng = SUM(quantity * khoi_luong)
+// Virtual field: Tổng khối lượng = SUM(quantity * khoi_luong)
 phieuLeSchema.virtual("tong_khoi_luong").get(function () {
   if (!this.chi_tiet || this.chi_tiet.length === 0) return 0;
 
   const total = this.chi_tiet.reduce((sum, item) => {
-    const quantity = item.quantity || 0;
-    const khoiLuong = item.khoi_luong || 0;
-    return sum + quantity * khoiLuong;
+    return sum + (item.quantity || 0) * (item.khoi_luong || 0);
   }, 0);
 
-  // Làm tròn 2 chữ số thập phân
   return Math.round(total * 100) / 100;
 });
 
-// Index để tìm kiếm nhanh
+// Index
 phieuLeSchema.index({ so_document: 1 });
 phieuLeSchema.index({ "chi_tiet.sku": 1 });
 phieuLeSchema.index({ "chi_tiet.slot": 1 });
