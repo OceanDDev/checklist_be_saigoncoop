@@ -81,21 +81,10 @@ const kiemTraGPS = (req, res, next) => {
 };
 
 // ─── Middleware: Kiểm tra Device ID ─────────────────────────────────────────
-//
-//  Luồng hoạt động:
-//    1. FE dùng FingerprintJS tạo device_id TRƯỚC khi gọi API
-//    2. FE gửi device_id lên cùng với request check-in
-//    3. Middleware này kiểm tra: hôm nay device_id này đã chấm cho ai chưa?
-//       - Nếu device_id đã chấm cho người KHÁC → BLOCK (chấm hộ)
-//       - Nếu device_id đã chấm cho CHÍNH người này → cho qua (checkout)
-//       - Nếu chưa có → cho qua
-//
 const kiemTraDeviceId = async (req, res, next) => {
   try {
     const { device_id, ma_nhan_vien } = req.body;
 
-    // Nếu FE không gửi device_id thì bỏ qua (backward compatible)
-    // Bạn có thể đổi thành return 400 nếu muốn bắt buộc
     if (!device_id) {
       return next();
     }
@@ -107,7 +96,6 @@ const kiemTraDeviceId = async (req, res, next) => {
       now.getDate(),
     );
 
-    // Tìm xem hôm nay device_id này đã được dùng để check-in chưa
     const recordCungDevice = await ChamCong.findOne({
       device_id,
       ngay: ngayHomNay,
@@ -116,7 +104,6 @@ const kiemTraDeviceId = async (req, res, next) => {
     if (recordCungDevice) {
       const maNormalized = (ma_nhan_vien || "").toUpperCase();
       if (recordCungDevice.ma_nhan_vien !== maNormalized) {
-        // ❌ Khác người → BLOCK + ghi vi phạm vào record của người bị chấm hộ
         await ChamCong.findByIdAndUpdate(recordCungDevice._id, {
           vi_pham_cham_ho: true,
           vi_pham_device_id: device_id,
@@ -129,10 +116,8 @@ const kiemTraDeviceId = async (req, res, next) => {
           blocked_by: "device_id",
         });
       }
-      // ✅ Cùng người → cho qua (checkout bình thường)
     }
 
-    // Gắn device_id vào req để controller dùng khi lưu DB
     req.deviceId = device_id;
     next();
   } catch (error) {
@@ -143,7 +128,7 @@ const kiemTraDeviceId = async (req, res, next) => {
 // ─── Chấm công vào/ra ────────────────────────────────────────────────────────
 const chamCong = async (req, res) => {
   try {
-    const { ma_nhan_vien, ten_nhan_vien, bo_phan } = req.nhanVien;
+const { ma_nhan_vien, ten_nhan_vien, bo_phan, chuc_vu } = req.nhanVien;
     const { action, latitude, longitude } = req.body;
 
     const now = new Date();
@@ -166,15 +151,15 @@ const chamCong = async (req, res) => {
     }
 
     if (!chamCongHomNay) {
-      // ─── CHECK-IN ────────────────────────────────────────────────────────
       chamCongHomNay = await ChamCong.create({
         ten_nhan_vien,
         ma_nhan_vien,
         bo_phan,
+        chuc_vu,
         ngay: ngayHomNay,
         gio_vao: now,
         vi_tri_vao: { latitude, longitude, distance: req.gpsDistance },
-        device_id: req.deviceId || "", // ← Lưu device_id khi check-in
+        device_id: req.deviceId || "",
       });
       return res.status(201).json({
         message: "✅ Chấm công vào thành công",
@@ -189,7 +174,6 @@ const chamCong = async (req, res) => {
           message: "Bạn đã check-in hôm nay rồi. Vui lòng chọn Check-Out.",
         });
       }
-      // ─── CHECK-OUT ───────────────────────────────────────────────────────
       const tongGio = (now - chamCongHomNay.gio_vao) / (1000 * 60 * 60);
       chamCongHomNay.gio_ra = now;
       chamCongHomNay.tong_gio = parseFloat(tongGio.toFixed(2));
@@ -241,8 +225,7 @@ const trangThaiHomNay = async (req, res) => {
   }
 };
 
-// ─── Danh sách / Chi tiết / CRUD ─────────────────────────────────────────────
-// controllers/chamcong/chamcong.controller.js
+// ─── Danh sách ───────────────────────────────────────────────────────────────
 const getDanhSach = async (req, res) => {
   try {
     const { ngay, bo_phan, ma_nhan_vien, tu_ngay, den_ngay } = req.query;
@@ -252,13 +235,8 @@ const getDanhSach = async (req, res) => {
       filter.ngay = new Date(ngay);
     } else if (tu_ngay || den_ngay) {
       filter.ngay = {};
-      if (tu_ngay) filter.ngay.$gte = new Date(tu_ngay);
-      if (den_ngay) {
-        // include cả ngày cuối (đến hết 23:59:59)
-        const end = new Date(den_ngay);
-        end.setHours(23, 59, 59, 999);
-        filter.ngay.$lte = end;
-      }
+      if (tu_ngay) filter.ngay.$gte = new Date(`${tu_ngay}T00:00:00+07:00`);
+      if (den_ngay) filter.ngay.$lte = new Date(`${den_ngay}T23:59:59+07:00`);
     }
 
     if (bo_phan) filter.bo_phan = bo_phan;
@@ -320,9 +298,19 @@ const deleteManyChamCong = async (req, res) => {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
+
+// ─── Admin: Thêm bản ghi chấm công ──────────────────────────────────────────
 const adminAddChamCong = async (req, res) => {
   try {
-    const { ma_nhan_vien, ngay, gio_vao, gio_ra, ghi_chu } = req.body;
+    const {
+      ma_nhan_vien,
+      ngay,
+      gio_vao,
+      gio_ra,
+      gio_vao_phu,
+      gio_ra_phu,
+      ghi_chu,
+    } = req.body;
 
     if (!ma_nhan_vien || !ngay || !gio_vao) {
       return res
@@ -330,7 +318,6 @@ const adminAddChamCong = async (req, res) => {
         .json({ message: "Thiếu thông tin bắt buộc: mã NV, ngày, giờ vào" });
     }
 
-    // Lấy thông tin nhân viên
     const nhanVien = await NhanVien.findOne({
       ma_nhan_vien: ma_nhan_vien.toUpperCase(),
     });
@@ -340,10 +327,8 @@ const adminAddChamCong = async (req, res) => {
         .json({ message: "Mã nhân viên không tồn tại trong hệ thống" });
     }
 
-    const ngayDate = new Date(ngay);
-    ngayDate.setHours(0, 0, 0, 0);
+    const ngayDate = new Date(`${ngay}T00:00:00+07:00`); // ✅ timezone VN
 
-    // Kiểm tra đã tồn tại chưa
     const exists = await ChamCong.findOne({
       ma_nhan_vien: nhanVien.ma_nhan_vien,
       ngay: ngayDate,
@@ -354,26 +339,51 @@ const adminAddChamCong = async (req, res) => {
       });
     }
 
-    const gioVaoDate = new Date(`${ngay}T${gio_vao}:00`);
+    // ─── Ca chính ───────────────────────────────────────────────────────────
+    const gioVaoDate = new Date(`${ngay}T${gio_vao}:00+07:00`);
     let gioRaDate = null;
     let tongGio = null;
 
     if (gio_ra) {
-      gioRaDate = new Date(`${ngay}T${gio_ra}:00`);
+      gioRaDate = new Date(`${ngay}T${gio_ra}:00+07:00`);
       if (gioRaDate <= gioVaoDate) {
         return res.status(400).json({ message: "Giờ ra phải sau giờ vào" });
       }
       tongGio = parseFloat(((gioRaDate - gioVaoDate) / 3_600_000).toFixed(2));
     }
 
+    // ─── Ca phụ ─────────────────────────────────────────────────────────────
+    let gioVaoPhuDate = null;
+    let gioRaPhuDate = null;
+    let tongGioPhu = null;
+
+    if (gio_vao_phu) {
+      gioVaoPhuDate = new Date(`${ngay}T${gio_vao_phu}:00+07:00`);
+    }
+    if (gio_ra_phu && gioVaoPhuDate) {
+      gioRaPhuDate = new Date(`${ngay}T${gio_ra_phu}:00+07:00`);
+      if (gioRaPhuDate <= gioVaoPhuDate) {
+        return res
+          .status(400)
+          .json({ message: "Giờ ra phụ phải sau giờ vào phụ" });
+      }
+      tongGioPhu = parseFloat(
+        ((gioRaPhuDate - gioVaoPhuDate) / 3_600_000).toFixed(2),
+      );
+    }
+
     const record = await ChamCong.create({
       ma_nhan_vien: nhanVien.ma_nhan_vien,
       ten_nhan_vien: nhanVien.ten_nhan_vien,
       bo_phan: nhanVien.bo_phan,
+      chuc_vu: nhanVien.chuc_vu,
       ngay: ngayDate,
       gio_vao: gioVaoDate,
       gio_ra: gioRaDate,
       tong_gio: tongGio,
+      gio_vao_phu: gioVaoPhuDate,
+      gio_ra_phu: gioRaPhuDate,
+      tong_gio_phu: tongGioPhu,
       ghi_chu: ghi_chu || "",
       device_id: "ADMIN",
     });
@@ -388,14 +398,21 @@ const adminAddChamCong = async (req, res) => {
 const adminEditChamCong = async (req, res) => {
   try {
     const { id } = req.params;
-    const { ngay, gio_vao, gio_ra, ghi_chu, ma_nhan_vien } = req.body;
+    const {
+      ngay,
+      gio_vao,
+      gio_ra,
+      gio_vao_phu,
+      gio_ra_phu,
+      ghi_chu,
+      ma_nhan_vien,
+    } = req.body;
 
     const record = await ChamCong.findById(id);
     if (!record) {
       return res.status(404).json({ message: "Không tìm thấy bản ghi" });
     }
 
-    // Nếu đổi mã NV thì verify
     if (ma_nhan_vien && ma_nhan_vien.toUpperCase() !== record.ma_nhan_vien) {
       const nhanVien = await NhanVien.findOne({
         ma_nhan_vien: ma_nhan_vien.toUpperCase(),
@@ -406,19 +423,29 @@ const adminEditChamCong = async (req, res) => {
       record.ma_nhan_vien = nhanVien.ma_nhan_vien;
       record.ten_nhan_vien = nhanVien.ten_nhan_vien;
       record.bo_phan = nhanVien.bo_phan;
+      record.chuc_vu = nhanVien.chuc_vu;   // 👈 thêm
+
     }
 
-    const ngayStr = ngay || record.ngay.toISOString().slice(0, 10);
+    // ✅ Lấy ngayStr chuẩn VN để build DateTime
+    const ngayStr = ngay
+      ? ngay
+      : (() => {
+          const d = new Date(record.ngay.getTime() + 7 * 60 * 60 * 1000);
+          return d.toISOString().slice(0, 10);
+        })();
 
+    // ─── Ca chính ───────────────────────────────────────────────────────────
     if (gio_vao) {
-      record.gio_vao = new Date(`${ngayStr}T${gio_vao}:00`);
+      record.gio_vao = new Date(`${ngayStr}T${gio_vao}:00+07:00`);
     }
+
     if (gio_ra !== undefined) {
       if (gio_ra === "" || gio_ra === null) {
         record.gio_ra = null;
         record.tong_gio = null;
       } else {
-        const gioRaDate = new Date(`${ngayStr}T${gio_ra}:00`);
+        const gioRaDate = new Date(`${ngayStr}T${gio_ra}:00+07:00`);
         if (gioRaDate <= record.gio_vao) {
           return res.status(400).json({ message: "Giờ ra phải sau giờ vào" });
         }
@@ -428,11 +455,44 @@ const adminEditChamCong = async (req, res) => {
         );
       }
     }
-    if (ngay) {
-      const ngayDate = new Date(ngay);
-      ngayDate.setHours(0, 0, 0, 0);
-      record.ngay = ngayDate;
+
+    // ─── Ca phụ ─────────────────────────────────────────────────────────────
+    if (gio_vao_phu !== undefined) {
+      record.gio_vao_phu = gio_vao_phu
+        ? new Date(`${ngayStr}T${gio_vao_phu}:00+07:00`)
+        : null;
+      // Reset ca phụ nếu xóa giờ vào phụ
+      if (!gio_vao_phu) {
+        record.gio_ra_phu = null;
+        record.tong_gio_phu = null;
+      }
     }
+
+    if (gio_ra_phu !== undefined) {
+      if (gio_ra_phu === "" || gio_ra_phu === null) {
+        record.gio_ra_phu = null;
+        record.tong_gio_phu = null;
+      } else {
+        const gioRaPhuDate = new Date(`${ngayStr}T${gio_ra_phu}:00+07:00`);
+        if (record.gio_vao_phu && gioRaPhuDate <= record.gio_vao_phu) {
+          return res
+            .status(400)
+            .json({ message: "Giờ ra phụ phải sau giờ vào phụ" });
+        }
+        record.gio_ra_phu = gioRaPhuDate;
+        record.tong_gio_phu = record.gio_vao_phu
+          ? parseFloat(
+              ((gioRaPhuDate - record.gio_vao_phu) / 3_600_000).toFixed(2),
+            )
+          : null;
+      }
+    }
+
+    // ─── Ngày & Ghi chú ─────────────────────────────────────────────────────
+    if (ngay) {
+      record.ngay = new Date(`${ngay}T00:00:00+07:00`);
+    }
+
     if (ghi_chu !== undefined) record.ghi_chu = ghi_chu;
 
     await record.save();
@@ -444,6 +504,7 @@ const adminEditChamCong = async (req, res) => {
   }
 };
 
+// ─── Import năng suất ────────────────────────────────────────────────────────
 const importNangSuat = async (req, res) => {
   try {
     const { data } = req.body;
@@ -503,6 +564,21 @@ const importNangSuat = async (req, res) => {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
+const toggleKhoa = async (req, res) => {
+  try {
+    const record = await ChamCong.findById(req.params.id);
+    if (!record) return res.status(404).json({ message: "Không tìm thấy bản ghi" });
+
+    const { ly_do_khoa } = req.body;
+    record.is_locked = !record.is_locked;
+    // Khi mở khóa thì xóa lý do
+    record.ly_do_khoa = record.is_locked ? (ly_do_khoa || "") : "";
+    await record.save();
+    return res.status(200).json({ message: record.is_locked ? "Đã khóa" : "Đã mở khóa", data: record });
+  } catch (error) {
+    res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
 
 module.exports = {
   chamCong,
@@ -513,9 +589,10 @@ module.exports = {
   deleteManyChamCong,
   kiemTraGPS,
   kiemTraNhanVien,
-  kiemTraDeviceId, // ← export mới
+  kiemTraDeviceId,
   trangThaiHomNay,
   adminAddChamCong,
   adminEditChamCong,
   importNangSuat,
+  toggleKhoa
 };

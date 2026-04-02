@@ -52,6 +52,12 @@ router.patch(
   verifyToken,
   chamCongController.updateGhiChu,
 );
+router.patch(
+  "/chamcong/:id/toggle-khoa",
+  verifyToken,
+  chamCongController.toggleKhoa,
+);
+
 router.get("/chamcong", verifyToken, chamCongController.getDanhSach);
 router.get("/chamcong/:id", verifyToken, chamCongController.getChiTiet);
 router.delete("/chamcong/:id", verifyToken, chamCongController.xoaChamCong);
