@@ -2211,11 +2211,8 @@ exports.import8101PhieuLe = async (req, res) => {
       chi_tiet,
       sd_tf,
       mach,
-      tench,
-      quan,
-      chuyen,
-      ghi_chu_ch,
       trang_thai,
+      ghi_chu_ch, // vẫn giữ để override nếu cần
     } = req.body;
 
     if (!Array.isArray(chi_tiet) || chi_tiet.length === 0) {
@@ -2234,26 +2231,30 @@ exports.import8101PhieuLe = async (req, res) => {
       }
     }
 
+    // ✅ Map DataCH theo mach để lấy tench, quan, chuyen
+    const dataCHInfo = mach
+      ? await mapDataCHInfoByMach(mach, sd_tf)
+      : { sd_tf, mach: "", tench: "", quan: "", chuyen: "", ghi_chu_ch: "" };
+
     const newPhieuLe = new PhieuLe({
       loai_phieu: "8101",
       chi_tiet,
       trang_thai: trang_thai || "Chờ xử lý",
       ngay_import: new Date(),
-      sd_tf: sd_tf ?? null,
-      mach: mach ?? "",
-      tench: tench ?? "",
-      quan: quan ?? "",
-      chuyen: chuyen ?? "",
-      ghi_chu_ch: ghi_chu_ch ?? "",
+      ...dataCHInfo,
+      // Override ghi_chu_ch nếu body truyền vào
+      ...(ghi_chu_ch !== undefined && { ghi_chu_ch }),
     });
 
     await newPhieuLe.save();
 
     res.status(201).json({
       message: "✅ Import 8101 thành công",
-      sd_tf,
-      mach,
-      tench,
+      sd_tf: dataCHInfo.sd_tf,
+      mach: dataCHInfo.mach,
+      tench: dataCHInfo.tench,
+      quan: dataCHInfo.quan,
+      chuyen: dataCHInfo.chuyen,
       total_items: chi_tiet.length,
     });
   } catch (error) {
@@ -2262,4 +2263,4 @@ exports.import8101PhieuLe = async (req, res) => {
       .status(500)
       .json({ message: "Lỗi khi import 8101", error: error.message });
   }
-};
+};  
