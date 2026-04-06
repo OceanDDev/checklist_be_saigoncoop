@@ -2,6 +2,14 @@
 const ChamCong = require("../../models/chamcong/chamcong");
 const NhanVien = require("../../models/chamcong/nhanvien");
 
+function getNgayHomNayVN() {
+  const now = new Date();
+  const vnNow = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  return new Date(
+    Date.UTC(vnNow.getUTCFullYear(), vnNow.getUTCMonth(), vnNow.getUTCDate()),
+  );
+}
+
 const COMPANY_LOCATION = {
   latitude: 10.890972,
   longitude: 106.748611,
@@ -89,13 +97,8 @@ const kiemTraDeviceId = async (req, res, next) => {
       return next();
     }
 
+    const ngayHomNay = getNgayHomNayVN();
     const now = new Date();
-    const ngayHomNay = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
-
     const recordCungDevice = await ChamCong.findOne({
       device_id,
       ngay: ngayHomNay,
@@ -128,15 +131,10 @@ const kiemTraDeviceId = async (req, res, next) => {
 // ─── Chấm công vào/ra ────────────────────────────────────────────────────────
 const chamCong = async (req, res) => {
   try {
-const { ma_nhan_vien, ten_nhan_vien, bo_phan, chuc_vu } = req.nhanVien;
+    const { ma_nhan_vien, ten_nhan_vien, bo_phan, chuc_vu } = req.nhanVien;
     const { action, latitude, longitude } = req.body;
-
     const now = new Date();
-    const ngayHomNay = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
+    const ngayHomNay = getNgayHomNayVN();
 
     let chamCongHomNay = await ChamCong.findOne({
       ma_nhan_vien,
@@ -203,12 +201,7 @@ const trangThaiHomNay = async (req, res) => {
   try {
     const ma = (req.query.ma_nhan_vien || "").toUpperCase();
     if (!ma) return res.status(400).json({ message: "Thiếu mã nhân viên" });
-    const now = new Date();
-    const ngayHomNay = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
+    const ngayHomNay = getNgayHomNayVN();
     const record = await ChamCong.findOne({
       ma_nhan_vien: ma,
       ngay: ngayHomNay,
@@ -423,8 +416,7 @@ const adminEditChamCong = async (req, res) => {
       record.ma_nhan_vien = nhanVien.ma_nhan_vien;
       record.ten_nhan_vien = nhanVien.ten_nhan_vien;
       record.bo_phan = nhanVien.bo_phan;
-      record.chuc_vu = nhanVien.chuc_vu;   // 👈 thêm
-
+      record.chuc_vu = nhanVien.chuc_vu; // 👈 thêm
     }
 
     // ✅ Lấy ngayStr chuẩn VN để build DateTime
@@ -522,10 +514,9 @@ const importNangSuat = async (req, res) => {
       const ma = (item.id || "").toUpperCase().trim();
       if (!ma || !item.ngay_nang_suat) continue;
 
-      const ngayDate = new Date(item.ngay_nang_suat);
-      ngayDate.setHours(0, 0, 0, 0);
-      const ngayEnd = new Date(ngayDate);
-      ngayEnd.setHours(23, 59, 59, 999);
+      // ✅ Parse đúng timezone VN — ngay_nang_suat phải là "YYYY-MM-DD"
+      const ngayDate = new Date(`${item.ngay_nang_suat}T00:00:00+07:00`);
+      const ngayEnd = new Date(`${item.ngay_nang_suat}T23:59:59+07:00`);
 
       const record = await ChamCong.findOne({
         ma_nhan_vien: ma,
@@ -567,14 +558,18 @@ const importNangSuat = async (req, res) => {
 const toggleKhoa = async (req, res) => {
   try {
     const record = await ChamCong.findById(req.params.id);
-    if (!record) return res.status(404).json({ message: "Không tìm thấy bản ghi" });
+    if (!record)
+      return res.status(404).json({ message: "Không tìm thấy bản ghi" });
 
     const { ly_do_khoa } = req.body;
     record.is_locked = !record.is_locked;
     // Khi mở khóa thì xóa lý do
-    record.ly_do_khoa = record.is_locked ? (ly_do_khoa || "") : "";
+    record.ly_do_khoa = record.is_locked ? ly_do_khoa || "" : "";
     await record.save();
-    return res.status(200).json({ message: record.is_locked ? "Đã khóa" : "Đã mở khóa", data: record });
+    return res.status(200).json({
+      message: record.is_locked ? "Đã khóa" : "Đã mở khóa",
+      data: record,
+    });
   } catch (error) {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
@@ -594,5 +589,5 @@ module.exports = {
   adminAddChamCong,
   adminEditChamCong,
   importNangSuat,
-  toggleKhoa
+  toggleKhoa,
 };

@@ -5,11 +5,24 @@ const nhanVienController = require("../../controllers/chamcong/nhanvien.controll
 const qrController = require("../../controllers/chamcong/qr.controller");
 const { verifyToken } = require("../../middlewares/authMiddleware");
 
-// ── QR (public - nhân viên chấm công không cần login) ────────────────────────
+function kiemTraGioHoatDong(req, res, next) {
+  const vnNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  const tongPhut = vnNow.getUTCHours() * 60 + vnNow.getUTCMinutes();
+  if (tongPhut < 390 || tongPhut >= 1320) {
+    // 6:30 = 390, 22:00 = 1320
+    return res.status(403).json({
+      message: "Hệ thống chỉ hoạt động từ 06:30 đến 22:00.",
+      code: "OUTSIDE_WORKING_HOURS",
+    });
+  }
+  next();
+}
+// ── QR (public - nhân viên chấm công không cần login) ─────────────   ───────────
 router.get("/chamcong/qr/current", qrController.getCurrentQr);
 router.get("/chamcong/qr/validate", qrController.validateQrToken);
 router.post(
   "/chamcong/check-qr",
+  kiemTraGioHoatDong,
   qrController.kiemTraQrToken,
   chamCongController.kiemTraGPS,
   chamCongController.kiemTraNhanVien,
