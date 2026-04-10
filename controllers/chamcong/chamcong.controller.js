@@ -93,41 +93,57 @@ const kiemTraDeviceId = async (req, res, next) => {
   try {
     const { device_id, ma_nhan_vien } = req.body;
 
-    if (!device_id) {
+    // 1. Bỏ qua nếu không có ID hoặc frontend gửi lên các chuỗi lỗi
+    if (
+      !device_id ||
+      device_id === "undefined" ||
+      device_id === "null" ||
+      device_id.trim() === ""
+    ) {
       return next();
     }
 
+    const maMoi = (ma_nhan_vien || "").toUpperCase().trim();
     const ngayHomNay = getNgayHomNayVN();
-    const now = new Date();
+
+    // 2. Tìm xem CÓ AI KHÁC đã dùng device_id này trong hôm nay chưa
+    // Toán tử $ne (Not Equal) giúp loại trừ chính bản thân người đang chấm công
     const recordCungDevice = await ChamCong.findOne({
-      device_id,
+      device_id: device_id,
       ngay: ngayHomNay,
+      ma_nhan_vien: { $ne: maMoi },
     });
 
+    // 3. Nếu tìm thấy một người KHÁC đã dùng máy này
     if (recordCungDevice) {
-      const maNormalized = (ma_nhan_vien || "").toUpperCase();
-      if (recordCungDevice.ma_nhan_vien !== maNormalized) {
-        await ChamCong.findByIdAndUpdate(recordCungDevice._id, {
-          vi_pham_cham_ho: true,
-          vi_pham_device_id: device_id,
-          vi_pham_thoi_gian: now,
-          $inc: { vi_pham_so_lan: 1 },
-        });
+      const now = new Date();
 
-        return res.status(403).json({
-          message: `Thiết bị này đã được dùng để chấm công cho nhân viên khác hôm nay (${recordCungDevice.ma_nhan_vien}). Không thể chấm hộ.`,
-          blocked_by: "device_id",
-        });
-      }
+      // Ghi nhận vi phạm vào lịch sử của người đã dùng máy trước đó (hoặc tuỳ logic log của bạn)
+      await ChamCong.findByIdAndUpdate(recordCungDevice._id, {
+        vi_pham_cham_ho: true,
+        vi_pham_device_id: device_id,
+        vi_pham_thoi_gian: now,
+        $inc: { vi_pham_so_lan: 1 },
+      });
+
+      return res.status(403).json({
+        message: `Thiết bị này đã được dùng để chấm công cho nhân viên khác (${recordCungDevice.ma_nhan_vien}) trong hôm nay. Không thể chấm hộ.`,
+        blocked_by: "device_id",
+      });
     }
 
+    // 4. Hợp lệ (chưa ai dùng máy này, hoặc chính người này dùng) -> Cho qua
     req.deviceId = device_id;
     next();
   } catch (error) {
-    res.status(500).json({ message: "Lỗi server", error: error.message });
+    res
+      .status(500)
+      .json({
+        message: "Lỗi server khi kiểm tra thiết bị",
+        error: error.message,
+      });
   }
 };
-
 // ─── Chấm công vào/ra ────────────────────────────────────────────────────────
 const chamCong = async (req, res) => {
   try {
