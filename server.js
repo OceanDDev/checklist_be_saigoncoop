@@ -6,15 +6,15 @@ const path = require("path");
 const http = require("http");
 const { Server } = require("socket.io");
 const { startQrRotation } = require("./controllers/chamcong/qr.controller");
+const multer = require("multer");
 
 dotenv.config();
 const app = express();
-const server = http.createServer(app); // ← wrap app vào http server
+const server = http.createServer(app);
 const PORT = process.env.PORT || 5000;
 
 const allowedOrigins = process.env.CORS_ORIGINS?.split(",") || [];
 
-// ── CORS cho Express ──────────────────────────────────────────────────────────
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -28,7 +28,6 @@ app.use(
   }),
 );
 
-// ── Socket.IO ─────────────────────────────────────────────────────────────────
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins.length ? allowedOrigins : "*",
@@ -46,6 +45,7 @@ io.on("connection", (socket) => {
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use(verifyIP); // ← thêm dòng này
 
 app.use((req, res, next) => {
   if (req.body && Object.keys(req.body).length > 0) {
@@ -78,7 +78,8 @@ const ThietBiRoutes = require("./routes/ttb/ttb.routes.js");
 const PhieuLeRoutes = require("./routes/phieusoan/phieule.routes.js");
 const ChamCongRoutes = require("./routes/chamcong/chamcong.routes.js");
 const NangSuatRoutes = require("./routes/nangsuat/nangsuat.routes.js");
-
+const LearningRoutes = require("./routes/leaningSCL/learning.routes.js");
+const TonKhoRoutes = require("./routes/tonkho/tonkho.routes.js");
 
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
@@ -100,17 +101,26 @@ app.use("/api/saigoncoop", ThietBiRoutes);
 app.use("/api/saigoncoop", PhieuLeRoutes);
 app.use("/api/saigoncoop", ChamCongRoutes);
 app.use("/api/saigoncoop", NangSuatRoutes);
+app.use("/api/saigoncoop", LearningRoutes);
+app.use("/api/saigoncoop", TonKhoRoutes);
 
+app.use((err, req, res, next) => {
+  if (err.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({ loi: "File quá lớn" });
+  }
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({ loi: err.message });
+  }
+  next(err);
+});
 
-// ── Kết nối MongoDB rồi mới start server ─────────────────────────────────────
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {
     console.log("✅ Connected to MongoDB");
     server.listen(PORT, () => {
-      // ← server.listen thay vì app.listen
       console.log(`🚀 Server running on port ${PORT}`);
-      startQrRotation(io); // ← khởi động QR rotation sau khi server ready
+      startQrRotation(io);
       console.log("📱 QR rotation started");
     });
   })

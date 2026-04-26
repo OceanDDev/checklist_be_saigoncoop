@@ -17,11 +17,12 @@ function parseSort(sortStr = "-ngay_import,-_id") {
 }
 
 function normalizeKey(k = "") {
-  return String(k)
+  const result = String(k)
     .replace(/^\uFEFF/, "")
     .trim()
     .replace(/\s+/g, "_")
     .toUpperCase();
+  return result;
 }
 
 const HEADER_MAP = {
@@ -356,40 +357,40 @@ exports.importManyDinhVi = async (req, res) => {
 exports.updatePackBySKU = async (req, res) => {
   try {
     const { sku, pack } = req.body;
-    
+
     if (!sku || pack === undefined) {
-      return res.status(400).json({ 
-        message: "Thiếu SKU hoặc pack" 
+      return res.status(400).json({
+        message: "Thiếu SKU hoặc pack",
       });
     }
 
     const packNum = parseInt(pack);
     if (isNaN(packNum)) {
-      return res.status(400).json({ 
-        message: "Pack phải là số" 
+      return res.status(400).json({
+        message: "Pack phải là số",
       });
     }
 
     const updated = await DinhVi.findOneAndUpdate(
       { sku: parseInt(sku) },
       { $set: { pack: packNum } },
-      { new: true }
+      { new: true },
     );
 
     if (!updated) {
-      return res.status(404).json({ 
-        message: "Không tìm thấy SKU" 
+      return res.status(404).json({
+        message: "Không tìm thấy SKU",
       });
     }
 
-    res.status(200).json({ 
-      message: "Cập nhật pack thành công", 
-      data: updated 
+    res.status(200).json({
+      message: "Cập nhật pack thành công",
+      data: updated,
     });
   } catch (error) {
-    res.status(400).json({ 
-      message: "Cập nhật thất bại", 
-      error: error.message 
+    res.status(400).json({
+      message: "Cập nhật thất bại",
+      error: error.message,
     });
   }
 };
@@ -398,36 +399,38 @@ exports.updatePackBySKU = async (req, res) => {
 exports.getKhoiLuongByMultipleSKU = async (req, res) => {
   try {
     const { skus } = req.body;
-    
+
     if (!Array.isArray(skus) || skus.length === 0) {
-      return res.status(400).json({ 
-        message: "skus phải là mảng và không được rỗng" 
+      return res.status(400).json({
+        message: "skus phải là mảng và không được rỗng",
       });
     }
 
     // Chuyển đổi sang số
-    const skuNumbers = skus.map(sku => parseInt(sku)).filter(sku => !isNaN(sku));
+    const skuNumbers = skus
+      .map((sku) => parseInt(sku))
+      .filter((sku) => !isNaN(sku));
 
     if (skuNumbers.length === 0) {
-      return res.status(400).json({ 
-        message: "Không có SKU hợp lệ" 
+      return res.status(400).json({
+        message: "Không có SKU hợp lệ",
       });
     }
 
     // Lấy dữ liệu từ DB
     const dinhViList = await DinhVi.find(
       { sku: { $in: skuNumbers } },
-      { sku: 1, khoiluong: 1 } // Chỉ lấy 2 field cần thiết
+      { sku: 1, khoiluong: 1 }, // Chỉ lấy 2 field cần thiết
     ).lean();
 
     // Tạo map { sku: khoiluong }
     const khoiLuongMap = {};
-    dinhViList.forEach(dv => {
+    dinhViList.forEach((dv) => {
       khoiLuongMap[dv.sku] = dv.khoiluong || null;
     });
 
     // Đảm bảo tất cả SKU đều có trong response (null nếu không tìm thấy)
-    skuNumbers.forEach(sku => {
+    skuNumbers.forEach((sku) => {
       if (!(sku in khoiLuongMap)) {
         khoiLuongMap[sku] = null;
       }
@@ -436,9 +439,9 @@ exports.getKhoiLuongByMultipleSKU = async (req, res) => {
     res.status(200).json(khoiLuongMap);
   } catch (error) {
     console.error("❌ Lỗi getKhoiLuongByMultipleSKU:", error);
-    res.status(500).json({ 
-      message: "Lỗi server", 
-      error: error.message 
+    res.status(500).json({
+      message: "Lỗi server",
+      error: error.message,
     });
   }
 };
@@ -450,32 +453,32 @@ exports.getKhoiLuongBySKU = async (req, res) => {
     const skuNum = parseInt(sku);
 
     if (isNaN(skuNum)) {
-      return res.status(400).json({ 
-        message: "SKU phải là số" 
+      return res.status(400).json({
+        message: "SKU phải là số",
       });
     }
 
     const dinhVi = await DinhVi.findOne(
       { sku: skuNum },
-      { khoiluong: 1 }
+      { khoiluong: 1 },
     ).lean();
 
     if (!dinhVi) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: "Không tìm thấy SKU",
-        khoiluong: null
+        khoiluong: null,
       });
     }
 
-    res.status(200).json({ 
+    res.status(200).json({
       sku: skuNum,
-      khoiluong: dinhVi.khoiluong || null 
+      khoiluong: dinhVi.khoiluong || null,
     });
   } catch (error) {
     console.error("❌ Lỗi getKhoiLuongBySKU:", error);
-    res.status(500).json({ 
-      message: "Lỗi server", 
-      error: error.message 
+    res.status(500).json({
+      message: "Lỗi server",
+      error: error.message,
     });
   }
 };
@@ -483,36 +486,38 @@ exports.getKhoiLuongBySKU = async (req, res) => {
 exports.getPackByMultipleSKU = async (req, res) => {
   try {
     const { skus } = req.body;
-    
+
     if (!Array.isArray(skus) || skus.length === 0) {
-      return res.status(400).json({ 
-        message: "skus phải là mảng và không được rỗng" 
+      return res.status(400).json({
+        message: "skus phải là mảng và không được rỗng",
       });
     }
 
     // Chuyển đổi sang số
-    const skuNumbers = skus.map(sku => parseInt(sku)).filter(sku => !isNaN(sku));
+    const skuNumbers = skus
+      .map((sku) => parseInt(sku))
+      .filter((sku) => !isNaN(sku));
 
     if (skuNumbers.length === 0) {
-      return res.status(400).json({ 
-        message: "Không có SKU hợp lệ" 
+      return res.status(400).json({
+        message: "Không có SKU hợp lệ",
       });
     }
 
     // Lấy dữ liệu từ DB
     const dinhViList = await DinhVi.find(
       { sku: { $in: skuNumbers } },
-      { sku: 1, pack: 1 } // Chỉ lấy 2 field cần thiết
+      { sku: 1, pack: 1 }, // Chỉ lấy 2 field cần thiết
     ).lean();
 
     // Tạo map { sku: pack }
     const packMap = {};
-    dinhViList.forEach(dv => {
+    dinhViList.forEach((dv) => {
       packMap[dv.sku] = dv.pack || null;
     });
 
     // Đảm bảo tất cả SKU đều có trong response (null nếu không tìm thấy)
-    skuNumbers.forEach(sku => {
+    skuNumbers.forEach((sku) => {
       if (!(sku in packMap)) {
         packMap[sku] = null;
       }
@@ -521,9 +526,9 @@ exports.getPackByMultipleSKU = async (req, res) => {
     res.status(200).json(packMap);
   } catch (error) {
     console.error("❌ Lỗi getPackByMultipleSKU:", error);
-    res.status(500).json({ 
-      message: "Lỗi server", 
-      error: error.message 
+    res.status(500).json({
+      message: "Lỗi server",
+      error: error.message,
     });
   }
 };
@@ -535,32 +540,29 @@ exports.getPackBySKU = async (req, res) => {
     const skuNum = parseInt(sku);
 
     if (isNaN(skuNum)) {
-      return res.status(400).json({ 
-        message: "SKU phải là số" 
+      return res.status(400).json({
+        message: "SKU phải là số",
       });
     }
 
-    const dinhVi = await DinhVi.findOne(
-      { sku: skuNum },
-      { pack: 1 }
-    ).lean();
+    const dinhVi = await DinhVi.findOne({ sku: skuNum }, { pack: 1 }).lean();
 
     if (!dinhVi) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: "Không tìm thấy SKU",
-        pack: null
+        pack: null,
       });
     }
 
-    res.status(200).json({ 
+    res.status(200).json({
       sku: skuNum,
-      pack: dinhVi.pack || null 
+      pack: dinhVi.pack || null,
     });
   } catch (error) {
     console.error("❌ Lỗi getPackBySKU:", error);
-    res.status(500).json({ 
-      message: "Lỗi server", 
-      error: error.message 
+    res.status(500).json({
+      message: "Lỗi server",
+      error: error.message,
     });
   }
 };
