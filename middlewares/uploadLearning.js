@@ -36,6 +36,22 @@ const filterVideo = (req, file, cb) => {
     : cb(new Error("Chỉ chấp nhận file video"), false);
 };
 
+const storageAnhBia = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "saigoncoop/anh-bia",
+    resource_type: "image",
+    allowed_formats: ["jpg", "jpeg", "png", "webp"],
+    transformation: [
+      { width: 1280, height: 720, crop: "limit", quality: "auto" },
+    ], // tự nén xuống
+  },
+});
+
+exports.uploadAnhBia = multer({
+  storage: storageAnhBia,
+  limits: { fileSize: 20 * 1024 * 1024 }, // tăng lên 20MB
+}).single("anhBia");
 
 // ── BACKBLAZE B2 ──────────────────────────────
 const s3 = new S3Client({

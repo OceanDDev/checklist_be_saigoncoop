@@ -27,11 +27,14 @@ exports.layMot = async (req, res) => {
   }
 };
 
-// Tạo khóa học mới
 exports.taoMoi = async (req, res) => {
   try {
+    const anhBia = req.file ? req.file.path : ""; // thêm dòng này
+
     const khoaHoc = await KhoaHoc.create({
-      ...req.body,
+      tieuDe: req.body.tieuDe,
+      moTa: req.body.moTa,
+      anhBia, // thay vì ...req.body
       nguoiTao: req.user.id,
     });
     res.status(201).json(khoaHoc);

@@ -6,6 +6,7 @@ const {
   uploadTaiLieu,
   uploadTaiLieuToB2,
 } = require("../../middlewares/uploadLearning");
+const { uploadAnhBia } = require("../../middlewares/uploadLearning");
 
 const khoaHocCtrl = require("../../controllers/learningSCL/course.controller");
 const baiHocCtrl = require("../../controllers/learningSCL/lesson.controller");
@@ -17,7 +18,18 @@ const luotLamBaiCtrl = require("../../controllers/learningSCL/attempt.controller
 // ─────────────────────────────────────────────
 router.get("/khoa-hoc", khoaHocCtrl.layTatCa);
 router.get("/khoa-hoc/:id", khoaHocCtrl.layMot);
-router.post("/khoa-hoc", auth, role(50), khoaHocCtrl.taoMoi);
+router.post(
+  "/khoa-hoc",
+  auth,
+  role(50),
+  (req, res, next) => {
+    uploadAnhBia(req, res, (err) => {
+      if (err) return res.status(400).json({ loi: err.message });
+      next();
+    });
+  },
+  khoaHocCtrl.taoMoi,
+);
 router.put("/khoa-hoc/:id", auth, role(50), khoaHocCtrl.capNhat);
 router.delete("/khoa-hoc/:id", auth, role(50), khoaHocCtrl.xoa);
 
@@ -28,7 +40,6 @@ router.post("/bai-hoc/khoa-hoc/:khoaHocId", auth, role(50), baiHocCtrl.taoMoi);
 router.get("/bai-hoc/:id", auth, baiHocCtrl.layMot);
 router.put("/bai-hoc/:id", auth, role(50), baiHocCtrl.capNhat);
 router.delete("/bai-hoc/:id", auth, role(50), baiHocCtrl.xoa);
-  
 
 // Upload tài liệu → multer đọc vào RAM → đẩy lên B2
 router.post(

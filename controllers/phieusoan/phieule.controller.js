@@ -267,7 +267,6 @@ async function updateMultipleChiTietHelper(phieuId, updates) {
   }
 }
 
-// ===== GET ALL - Có filter theo ngày import và ngày in phiếu =====
 exports.getAllPhieuLe = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -304,37 +303,47 @@ exports.getAllPhieuLe = async (req, res) => {
     if (sku) filter["chi_tiet.sku"] = parseInt(sku);
     if (slot) filter["chi_tiet.slot"] = { $regex: String(slot), $options: "i" };
 
+    const toVNStartOfDay = (dateStr) => {
+      if (
+        !dateStr ||
+        typeof dateStr !== "string" ||
+        !dateStr.match(/^\d{4}-\d{2}-\d{2}$/)
+      )
+        return null;
+      const d = new Date(dateStr + "T00:00:00.000+07:00");
+      return isNaN(d.getTime()) ? null : d;
+    };
+    const toVNEndOfDay = (dateStr) => {
+      if (
+        !dateStr ||
+        typeof dateStr !== "string" ||
+        !dateStr.match(/^\d{4}-\d{2}-\d{2}$/)
+      )
+        return null;
+      const d = new Date(dateStr + "T23:59:59.999+07:00");
+      return isNaN(d.getTime()) ? null : d;
+    };
+
     // Filter theo ngày import (chỉ khi không có print date filter)
     if ((startDate || endDate) && !printStartDate && !printEndDate) {
-      filter.ngay_import = {};
-      if (startDate) {
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
-        filter.ngay_import.$gte = start;
+      const start = toVNStartOfDay(startDate);
+      const end = toVNEndOfDay(endDate);
+      if (start || end) {
+        filter.ngay_import = {};
+        if (start) filter.ngay_import.$gte = start;
+        if (end) filter.ngay_import.$lte = end;
       }
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        filter.ngay_import.$lte = end;
-      }
-    }
+    } 
 
     // Filter theo ngày in phiếu (độc lập)
     if (printStartDate || printEndDate) {
+      const start = toVNStartOfDay(printStartDate);
+      const end = toVNEndOfDay(printEndDate);
       const printDateFilter = { $ne: null };
-      if (printStartDate) {
-        const start = new Date(printStartDate);
-        start.setHours(0, 0, 0, 0);
-        printDateFilter.$gte = start;
-      }
-      if (printEndDate) {
-        const end = new Date(printEndDate);
-        end.setHours(23, 59, 59, 999);
-        printDateFilter.$lte = end;
-      }
+      if (start) printDateFilter.$gte = start;
+      if (end) printDateFilter.$lte = end;
       filter.ngay_in_phieu = printDateFilter;
     }
-
     // Search tổng hợp
     if (search) {
       const searchNum = parseInt(search);
@@ -401,7 +410,6 @@ exports.getAllPhieuLe = async (req, res) => {
     });
   }
 };
-
 // ===== GET BY ID =====
 exports.getPhieuLeById = async (req, res) => {
   try {
@@ -2263,4 +2271,4 @@ exports.import8101PhieuLe = async (req, res) => {
       .status(500)
       .json({ message: "Lỗi khi import 8101", error: error.message });
   }
-};  
+};
