@@ -2221,6 +2221,7 @@ exports.import8101PhieuLe = async (req, res) => {
       mach,
       trang_thai,
       ghi_chu_ch, // vẫn giữ để override nếu cần
+      ghi_chu_phieu, // 👇 1. LẤY GHI CHÚ PHIẾU TỪ REQ.BODY
     } = req.body;
 
     if (!Array.isArray(chi_tiet) || chi_tiet.length === 0) {
@@ -2249,6 +2250,7 @@ exports.import8101PhieuLe = async (req, res) => {
       chi_tiet,
       trang_thai: trang_thai || "Chờ xử lý",
       ngay_import: new Date(),
+      ghi_chu_phieu, // 👇 2. TRUYỀN VÀO ĐÂY ĐỂ LƯU XUỐNG DB
       ...dataCHInfo,
       // Override ghi_chu_ch nếu body truyền vào
       ...(ghi_chu_ch !== undefined && { ghi_chu_ch }),
