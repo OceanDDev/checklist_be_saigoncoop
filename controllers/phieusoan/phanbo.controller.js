@@ -67,24 +67,19 @@ const getAllPhanBo = async (req, res) => {
     if (pack) conditions.push({ pack: Number(pack) });
     if (trang_thai) conditions.push({ trang_thai });
 
-    // ── sd_tf ────────────────────────────────────────────────────────
-    if (sd_tf) {
-      const safeSdTf = escapeRegex(sd_tf);
-      conditions.push({
-        $or: [
-          { sd_tf: { $regex: safeSdTf, $options: "i" } },
-          {
-            $expr: {
-              $regexMatch: {
-                input: { $toString: "$sd_tf" },
-                regex: safeSdTf,
-                options: "i",
-              },
-            },
-          },
-        ],
-      });
-    }
+// ── sd_tf ────────────────────────────────────────────────────────
+if (sd_tf) {
+  const safeSdTf = escapeRegex(sd_tf);
+  conditions.push({
+    $expr: {
+      $regexMatch: {
+        input: { $toString: "$sd_tf" },
+        regex: safeSdTf,
+        options: "i",
+      },
+    },
+  });
+}
 
     // ── Khoảng ngày ──────────────────────────────────────────────────
     if (startDate || endDate) {

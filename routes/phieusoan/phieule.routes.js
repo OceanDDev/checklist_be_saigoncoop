@@ -45,6 +45,8 @@ router.put("/phieule/:id/chitiet", verifyToken, phieuLeController.updateChiTietP
 router.put("/phieule/update-many", verifyToken, phieuLeController.updateManyPhieuLe);
 router.put("/phieule/:id", verifyToken, phieuLeController.updatePhieuLe);
 router.put("/phieule/:id/status", verifyToken, phieuLeController.updatePhieuLeStatus);
+router.delete("/phieule/many", verifyToken, phieuLeController.deleteManyPhieuLe);
+router.delete("/phieule/by-filter", verifyToken, phieuLeController.deleteManyPhieuLeByFilter);
 router.delete("/phieule/:id", verifyToken, phieuLeController.deletePhieuLe);
 
 // ===== DATA CỬA HÀNG ROUTES =====

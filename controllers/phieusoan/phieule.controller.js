@@ -294,7 +294,17 @@ exports.getAllPhieuLe = async (req, res) => {
     if (so_document) filter.so_document = parseInt(so_document);
     if (trang_thai) filter.trang_thai = trang_thai;
     if (loai_phieu) filter.loai_phieu = loai_phieu;
-    if (mach) filter.mach = { $regex: `^${mach}$`, $options: "i" };
+    if (mach) {
+      if (mach.toLowerCase() === "null") {
+        filter.$or = [
+          { mach: null },
+          { mach: "" },
+          { mach: { $exists: false } },
+        ];
+      } else {
+        filter.mach = { $regex: `^${mach}$`, $options: "i" };
+      }
+    }
     if (chuyen) filter.chuyen = { $regex: chuyen, $options: "i" };
     if (quan) {
       const cleanQuan = quan.trim().replace(/\s+/g, "\\s+");
@@ -333,7 +343,7 @@ exports.getAllPhieuLe = async (req, res) => {
         if (start) filter.ngay_import.$gte = start;
         if (end) filter.ngay_import.$lte = end;
       }
-    } 
+    }
 
     // Filter theo ngày in phiếu (độc lập)
     if (printStartDate || printEndDate) {
@@ -2272,5 +2282,113 @@ exports.import8101PhieuLe = async (req, res) => {
     res
       .status(500)
       .json({ message: "Lỗi khi import 8101", error: error.message });
+  }
+};
+
+// ===== DELETE MANY BY IDS =====
+exports.deleteManyPhieuLe = async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        message: "Danh sách IDs phải là mảng và không được rỗng",
+      });
+    }
+
+    const result = await PhieuLe.deleteMany({ _id: { $in: ids } });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        message: "Không tìm thấy phiếu lẻ nào với các ID đã cung cấp",
+      });
+    }
+
+    res.status(200).json({
+      message: `✅ Đã xóa ${result.deletedCount}/${ids.length} phiếu lẻ`,
+      stats: {
+        total_requested: ids.length,
+        deleted: result.deletedCount,
+        not_found: ids.length - result.deletedCount,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Lỗi deleteManyPhieuLe:", error);
+    res.status(500).json({
+      message: "Lỗi khi xóa nhiều phiếu lẻ",
+      error: error.message,
+    });
+  }
+};
+
+// ===== DELETE MANY BY FILTER =====
+exports.deleteManyPhieuLeByFilter = async (req, res) => {
+  try {
+    const { filter, confirmation } = req.body;
+
+    if (
+      !filter ||
+      typeof filter !== "object" ||
+      Object.keys(filter).length === 0
+    ) {
+      return res.status(400).json({
+        message:
+          "Filter không hợp lệ hoặc rỗng. Cung cấp ít nhất một điều kiện.",
+      });
+    }
+
+    // Bảo vệ: yêu cầu xác nhận khi xóa theo filter
+    if (confirmation !== "CONFIRM_DELETE") {
+      return res.status(400).json({
+        message:
+          '❌ Vui lòng thêm "confirmation": "CONFIRM_DELETE" vào body để xác nhận',
+      });
+    }
+
+    const allowedFilterFields = [
+      "trang_thai",
+      "loai_phieu",
+      "mach",
+      "chuyen",
+      "quan",
+      "sd_tf",
+      "ngay_import",
+    ];
+
+    const invalidFields = Object.keys(filter).filter(
+      (f) => !allowedFilterFields.includes(f),
+    );
+
+    if (invalidFields.length > 0) {
+      return res.status(400).json({
+        message: `Các field filter không được phép: ${invalidFields.join(", ")}`,
+        allowed_fields: allowedFilterFields,
+      });
+    }
+
+    // Đếm trước khi xóa
+    const countBeforeDelete = await PhieuLe.countDocuments(filter);
+
+    if (countBeforeDelete === 0) {
+      return res.status(404).json({
+        message: "Không tìm thấy phiếu lẻ nào phù hợp với điều kiện",
+      });
+    }
+
+    const result = await PhieuLe.deleteMany(filter);
+
+    res.status(200).json({
+      message: `✅ Đã xóa ${result.deletedCount} phiếu lẻ`,
+      stats: {
+        deleted: result.deletedCount,
+      },
+      filter_applied: filter,
+    });
+  } catch (error) {
+    console.error("❌ Lỗi deleteManyPhieuLeByFilter:", error);
+    res.status(500).json({
+      message: "Lỗi khi xóa nhiều phiếu lẻ theo filter",
+      error: error.message,
+    });
   }
 };

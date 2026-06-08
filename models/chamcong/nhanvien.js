@@ -2,7 +2,7 @@
 const mongoose = require("mongoose");
 
 const BO_PHAN_CHUC_VU = {
-  "Ngọc Phú": ["Kiểm chéo", "Soạn hàng", "Hỗ trợ xuất"],
+  "Ngọc Phú": ["Kiểm chéo", "Soạn hàng", "Hỗ trợ xuất","Tăng Ca Soạn"],
   "Xuất hàng": [
     "Xử lý đơn hàng TV",
     "Soạn hàng CT",
@@ -12,11 +12,12 @@ const BO_PHAN_CHUC_VU = {
     "Điều vận TV",
     "Điều vận CT",
     "Sinh Viên",
+    "Tăng Ca Soạn"
   ],
-  "Nhập hàng": ["Nhập hàng TV", "Nhập hàng CT", "Sinh Viên"],
+  "Nhập hàng": ["Nhập hàng TV", "Nhập hàng CT", "Sinh Viên","Tăng Ca Soạn"],
 
-  "Hỗ trợ Kho": ["Kiểm chéo", "Điều phối Xuất", "Sinh Viên"],
-  "Kế toán": ["Kế toán TV", "Kế Toán CT", "Sinh Viên"],
+  "Hỗ trợ Kho": ["Kiểm chéo", "Điều phối Xuất", "Sinh Viên","Tăng Ca Soạn"],
+  "Kế toán": ["Kế toán TV", "Kế Toán CT", "Sinh Viên","Tăng Ca Soạn"],
 };
 
 const ALL_BO_PHAN = Object.keys(BO_PHAN_CHUC_VU);

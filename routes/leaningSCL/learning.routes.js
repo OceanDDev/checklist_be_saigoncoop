@@ -71,26 +71,41 @@ router.delete(
   baiHocCtrl.xoaTaiLieu,
 );
 
-// ─────────────────────────────────────────────
-// BÀI KIỂM TRA
-// ─────────────────────────────────────────────
-router.post("/bai-kiem-tra", auth, role(50), baiKiemTraCtrl.taoMoi);
 router.get("/bai-kiem-tra/xac-thuc-qr", baiKiemTraCtrl.xacThucQR);
+
+// CRUD
+router.post("/bai-kiem-tra", auth, role(50), baiKiemTraCtrl.taoMoi);
+router.get("/bai-kiem-tra", auth, role(50), baiKiemTraCtrl.layTatCa);
+router.post("/bai-kiem-tra/:id/reset-phien", auth, role(50), baiKiemTraCtrl.resetPhien);
+
 router.get("/bai-kiem-tra/:id", auth, baiKiemTraCtrl.layMot);
 router.put("/bai-kiem-tra/:id", auth, role(50), baiKiemTraCtrl.capNhat);
 router.delete("/bai-kiem-tra/:id", auth, role(50), baiKiemTraCtrl.xoa);
-router.post("/bai-kiem-tra/:id/tao-qr", auth, role(50), baiKiemTraCtrl.taoQR);
 
-// ─────────────────────────────────────────────
-// LƯỢT LÀM BÀI
-// ─────────────────────────────────────────────
-router.post("/luot-lam-bai/nop-qr", luotLamBaiCtrl.nopBaiQR);
-router.get(
-  "/luot-lam-bai/tat-ca/:id",
+// Quản lý phiên — admin/teacher
+router.post(
+  "/bai-kiem-tra/:id/mo-phien",
   auth,
   role(50),
-  luotLamBaiCtrl.tatCaLuotLam,
+  baiKiemTraCtrl.moPhien,
 );
-router.get("/luot-lam-bai/tim-ten", auth, role(50), luotLamBaiCtrl.timTheoTen);
+router.post(
+  "/bai-kiem-tra/:id/ket-thuc",
+  auth,
+  role(50),
+  baiKiemTraCtrl.ketThuc,
+);
+
+// Học viên làm bài (không cần auth — chỉ cần token QR)
+router.post("/bai-kiem-tra/:id/bat-dau", baiKiemTraCtrl.batDau);
+router.post("/bai-kiem-tra/:id/nop-bai", baiKiemTraCtrl.nopBai);
+
+// Xem kết quả — admin/teacher
+router.get(
+  "/bai-kiem-tra/:id/ket-qua",
+  auth,
+  role(50),
+  baiKiemTraCtrl.xemKetQua,
+);
 
 module.exports = router;
