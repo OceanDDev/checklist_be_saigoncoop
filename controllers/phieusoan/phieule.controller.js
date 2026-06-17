@@ -2392,3 +2392,58 @@ exports.deleteManyPhieuLeByFilter = async (req, res) => {
     });
   }
 };
+
+exports.importSDPhieuLe = async (req, res) => {
+  try {
+    const { chi_tiet, sd_tf, mach, trang_thai, ghi_chu_ch, ghi_chu_phieu } = req.body;
+
+    if (!Array.isArray(chi_tiet) || chi_tiet.length === 0) {
+      return res.status(400).json({ message: "chi_tiet không được rỗng" });
+    }
+
+    if (sd_tf) {
+      const existingSdTf = await PhieuLe.findOne({ sd_tf, loai_phieu: "SD" });
+      if (existingSdTf) {
+        return res.status(409).json({
+          message: `SD/TF ${sd_tf} đã tồn tại trong phiếu SD`,
+          sd_tf,
+          existing_id: existingSdTf._id,
+        });
+      }
+    }
+
+    const dataCHInfo = mach
+      ? await mapDataCHInfoByMach(mach, sd_tf)
+      : { sd_tf, mach: "", tench: "", quan: "", chuyen: "", ghi_chu_ch: "" };
+
+    const chiTietCopy = chi_tiet.map((item) => ({ ...item }));
+    const tong_kien = await populatePacksToPick1AndTongKien(chiTietCopy);
+
+    const newPhieuLe = new PhieuLe({
+      loai_phieu: "SD",
+      chi_tiet: chiTietCopy,
+      trang_thai: trang_thai || "Chờ xử lý",
+      ngay_import: new Date(),
+      ghi_chu_phieu,
+      tong_kien,
+      ...dataCHInfo,
+      ...(ghi_chu_ch !== undefined && { ghi_chu_ch }),
+    });
+
+    await newPhieuLe.save();
+
+    res.status(201).json({
+      message: "✅ Import SD thành công",
+      sd_tf: dataCHInfo.sd_tf,
+      mach: dataCHInfo.mach,
+      tench: dataCHInfo.tench,
+      quan: dataCHInfo.quan,
+      chuyen: dataCHInfo.chuyen,
+      total_items: chiTietCopy.length,
+      tong_kien,
+    });
+  } catch (error) {
+    console.error("❌ Lỗi importSDPhieuLe:", error);
+    res.status(500).json({ message: "Lỗi khi import SD", error: error.message });
+  }
+};

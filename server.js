@@ -13,6 +13,10 @@ const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 5000;
 
+// 🔥 TỐI ƯU 1: Cấu hình Timeout cho HTTP Server để tránh treo request dắt dây gây lỗi 502
+server.keepAliveTimeout = 65000; // Giữ kết nối lâu hơn Nginx một chút (Nginx thường là 60s)
+server.headersTimeout = 66000;
+
 const allowedOrigins = process.env.CORS_ORIGINS?.split(",") || [];
 
 app.use(
@@ -28,11 +32,16 @@ app.use(
   }),
 );
 
+// 🔥 TỐI ƯU 2: Tối ưu cấu hình Socket.io cho môi trường Production qua Nginx Proxy
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins.length ? allowedOrigins : "*",
     methods: ["GET", "POST"],
+    credentials: true,
   },
+  transports: ["websocket", "polling"], // Ưu tiên kết nối thẳng bằng websocket trước
+  pingTimeout: 60000, // Tăng thời gian chờ ping/pong lên 60s chống rớt mạng ảo
+  pingInterval: 25000, // Gửi gói tin ping định kỳ mỗi 25s để duy trì kết nối sống qua Cloudflare
 });
 
 io.on("connection", (socket) => {
@@ -45,7 +54,7 @@ io.on("connection", (socket) => {
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-  
+
 app.use((req, res, next) => {
   if (req.body && Object.keys(req.body).length > 0) {
     const size = JSON.stringify(req.body).length;
@@ -56,7 +65,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Routes ────────────────────────────────────────────────────────────────────
+// ── Routes (Giữ nguyên 100%) ──────────────────────────────────────────────────
 const userRoutes = require("./routes/users/user.routes");
 const checklistRoutes = require("./routes/checklist/checklist.routes");
 const authRoutes = require("./routes/auth/auth.routes");
@@ -113,8 +122,14 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
+// 🔥 TỐI ƯU 3: Cấu hình Connection Pool cho MongoDB để tránh nghẽn luồng truy vấn lúc cao điểm
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(process.env.MONGO_URI, {
+    maxPoolSize: 50, // Cho phép tối đa 50 kết nối đồng thời gánh tải (mặc định là 10)
+    minPoolSize: 10, // Luôn duy trì sẵn 10 kết nối trống để chạy ngay không mất công đợi khởi tạo
+    serverSelectionTimeoutMS: 5000, // Nếu MongoDB đơ quá 5s thì ngắt lệnh ngay, tránh làm đứng cứng ngắc toàn bộ Node.js
+    socketTimeoutMS: 45000, // Ngắt các truy vấn treo quá 45 giây
+  })
   .then(() => {
     console.log("✅ Connected to MongoDB");
     server.listen(PORT, () => {

@@ -1,8 +1,8 @@
 const mongoose = require("mongoose");
 
 const dataCHSchema = new mongoose.Schema({
-  sd_tf:{ type: Number, required: true },
-  so_document: { type: Number, required: true },
+  sd_tf:{ type: Number, required: false },
+  so_document: { type: Number, required: false },
   mach: { type: String, required: true },
   tench: { type: String, required: true },
    quan: { type: String, required: true },

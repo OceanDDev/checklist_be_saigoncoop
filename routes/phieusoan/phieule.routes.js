@@ -26,6 +26,7 @@ const upload = multer({
 });
 
 // ===== PHIẾU LẺ ROUTES =====
+router.post("/phieule/import-soda", verifyToken, phieuLeController.importSDPhieuLe);
 router.get("/phieule/migrate-loai-phieu", verifyToken, phieuLeController.migrateLoaiPhieu);
 router.post("/phieule/import-8101", verifyToken,phieuLeController.import8101PhieuLe);
 router.post("/phieule/import-soda-txt", verifyToken, upload.single("file"), phieuLeController.importSodaTxtPhieuLe);
