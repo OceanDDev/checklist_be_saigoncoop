@@ -2,6 +2,8 @@ const jwt = require("jsonwebtoken");
 const JWT_SECRET = process.env.JWT_SECRET;
 
 exports.verifyToken = (req, res, next) => {
+  if (req.user) return next(); // ✅ thêm dòng này — API key đã auth rồi
+
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1]; // Bearer <token>
 

@@ -5,6 +5,7 @@ const path = require("path");
 const phieuLeController = require("../../controllers/phieusoan/phieule.controller");
 const dataCHController = require("../../controllers/phieusoan/dataCH.controller");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const apiKeyAuth = require("../../middlewares/apiKeyAuth");
 
 // ===== MULTER CONFIG =====
 const upload = multer({
@@ -35,7 +36,7 @@ router.get("/phieule", verifyToken, phieuLeController.getAllPhieuLe);
 router.get("/phieule/statistics", verifyToken, phieuLeController.getPhieuLeStatistics);
 router.get("/phieule/document/:so_document", verifyToken, phieuLeController.getPhieuLeBySoDocument);
 router.get("/phieule/:id", verifyToken, phieuLeController.getPhieuLeById);
-router.post("/phieule", verifyToken, phieuLeController.createPhieuLe);
+router.post("/phieule",apiKeyAuth, verifyToken, phieuLeController.createPhieuLe);
 router.post("/phieule/import", verifyToken, phieuLeController.importManyPhieuLe);
 router.post("/phieule/import-txt", verifyToken, upload.single("file"), phieuLeController.importTxtPhieuLe);
 router.post("/phieule/import-txt-multiple", verifyToken, upload.array("files", 50), phieuLeController.importTxtPhieuLeMultiple);
