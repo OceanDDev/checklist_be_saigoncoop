@@ -7,6 +7,18 @@ const dataCHController = require("../../controllers/phieusoan/dataCH.controller"
 const { verifyToken } = require("../../middlewares/authMiddleware");
 const apiKeyAuth = require("../../middlewares/apiKeyAuth");
 
+const {
+  createNhanSuSoan,
+  importManyNhanSuSoan,
+  getAllNhanSuSoan,
+  getNhanSuSoanById,
+  updateNhanSuSoan,
+  updateManyNhanSuSoan,
+  deleteNhanSuSoan,
+  deleteManyNhanSuSoan,
+  deleteAllNhanSuSoan,
+} = require("../../controllers/phieusoan/nhansusoan.controller"); 
+
 // ===== MULTER CONFIG =====
 const upload = multer({
   storage: multer.diskStorage({
@@ -29,14 +41,14 @@ const upload = multer({
 // ===== PHIẾU LẺ ROUTES =====
 router.post("/phieule/import-soda", verifyToken, phieuLeController.importSDPhieuLe);
 router.get("/phieule/migrate-loai-phieu", verifyToken, phieuLeController.migrateLoaiPhieu);
-router.post("/phieule/import-8101", verifyToken,phieuLeController.import8101PhieuLe);
+router.post("/phieule/import-8101", verifyToken, phieuLeController.import8101PhieuLe);
 router.post("/phieule/import-soda-txt", verifyToken, upload.single("file"), phieuLeController.importSodaTxtPhieuLe);
 router.post("/phieule/import-soda-txt-multiple", verifyToken, upload.array("files", 50), phieuLeController.importSodaTxtPhieuLeMultiple);
 router.get("/phieule", verifyToken, phieuLeController.getAllPhieuLe);
 router.get("/phieule/statistics", verifyToken, phieuLeController.getPhieuLeStatistics);
 router.get("/phieule/document/:so_document", verifyToken, phieuLeController.getPhieuLeBySoDocument);
 router.get("/phieule/:id", verifyToken, phieuLeController.getPhieuLeById);
-router.post("/phieule",apiKeyAuth, verifyToken, phieuLeController.createPhieuLe);
+router.post("/phieule", apiKeyAuth, verifyToken, phieuLeController.createPhieuLe);
 router.post("/phieule/import", verifyToken, phieuLeController.importManyPhieuLe);
 router.post("/phieule/import-txt", verifyToken, upload.single("file"), phieuLeController.importTxtPhieuLe);
 router.post("/phieule/import-txt-multiple", verifyToken, upload.array("files", 50), phieuLeController.importTxtPhieuLeMultiple);
@@ -59,5 +71,16 @@ router.post("/dataCH", verifyToken, dataCHController.addDataCH);
 router.post("/dataCH/addmany", verifyToken, dataCHController.importManyDataCH);
 router.put("/dataCH/:id", verifyToken, dataCHController.updateDataCH);
 router.delete("/dataCH/:id", verifyToken, dataCHController.deleteDataCH);
+
+// ===== NHÂN SỰ SOẠN ROUTES =====
+router.delete("/nhansusoan/delete-all", verifyToken, deleteAllNhanSuSoan);
+router.get("/nhansusoan", verifyToken, getAllNhanSuSoan);
+router.get("/nhansusoan/:id", verifyToken, getNhanSuSoanById);
+router.post("/nhansusoan", verifyToken, createNhanSuSoan);
+router.post("/nhansusoan/import", verifyToken, importManyNhanSuSoan);
+router.put("/nhansusoan/update-many", verifyToken, updateManyNhanSuSoan);
+router.put("/nhansusoan/:id", verifyToken, updateNhanSuSoan);
+router.delete("/nhansusoan/many", verifyToken, deleteManyNhanSuSoan);
+router.delete("/nhansusoan/:id", verifyToken, deleteNhanSuSoan);
 
 module.exports = router;
