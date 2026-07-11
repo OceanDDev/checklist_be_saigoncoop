@@ -89,14 +89,14 @@ exports.importManyDataCH = async (req, res) => {
     console.log(`📦 Bắt đầu import batch: ${data.length} records`);
 
     // ✅ VALIDATE TẤT CẢ RECORDS TRƯỚC
-    const invalidRecords = data.filter(
-      (record) => !record.mach || !record.tench,
+     const invalidRecords = data.filter(
+      (record) => !record.mach || !record.tench || !record.lich_di_hang,
     );
 
     if (invalidRecords.length > 0) {
       return res.status(400).json({
-        message: `Có ${invalidRecords.length} records thiếu mach hoặc tench`,
-        invalidRecords: invalidRecords.slice(0, 5), // Chỉ trả về 5 record đầu tiên
+        message: `Có ${invalidRecords.length} records thiếu mach, tench hoặc lich_di_hang`,
+        invalidRecords: invalidRecords.slice(0, 5),
       });
     }
 
@@ -116,6 +116,7 @@ exports.importManyDataCH = async (req, res) => {
             tench: record.tench,
             quan: record.quan || "",
             chuyen: record.chuyen || "",
+              lich_di_hang: record.lich_di_hang || "",
             ghi_chu_ch: record.ghi_chu_ch || "",
             ngay_cap_nhat: new Date(),
           },

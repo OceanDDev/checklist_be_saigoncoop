@@ -1,7 +1,64 @@
 // controllers/phieusoan/nhanSuSoan.controller.js
 const NhanSuSoan = require("../../models/phieusoan/nhansusoan");
 const NhanVien = require("../../models/chamcong/nhanvien");
+const DataCH = require("../../models/phieusoan/dataCH");
 
+/**
+ * Chuẩn hoá mã cửa hàng để so khớp giữa maNXD (NhanSuSoan) và mach (DataCH):
+ * - Nếu là số thuần (VD "02034") -> bỏ số 0 ở đầu ("2034")
+ * - Nếu là mã chữ (VD "ch00273") -> viết hoa toàn bộ ("CH00273")
+ */
+const normalizeMaCh = (raw) => {
+  if (!raw) return "";
+  const s = String(raw).trim();
+  if (/^\d+$/.test(s)) return String(parseInt(s, 10));
+  return s.toUpperCase();
+};
+
+const ganThongTinTuDataCHTheoMaCh = async (data) => {
+  const maChSet = new Set();
+  data.forEach((item) => {
+    const key = normalizeMaCh(item.maNXD);
+    if (key) maChSet.add(key);
+  });
+
+  if (maChSet.size === 0) return data;
+
+  const dataCHDocs = await DataCH.find(
+    { mach: { $in: Array.from(maChSet) } },
+    { mach: 1, chuyen: 1, lich_di_hang: 1, tench: 1, _id: 0 }, // ← đổi ten_ch -> tench
+  ).lean();
+
+  const machInfoMap = new Map();
+  dataCHDocs.forEach((d) => {
+    const key = normalizeMaCh(d.mach);
+    if (!key) return;
+    machInfoMap.set(key, {
+      chuyen: d.chuyen || "",
+      lich_di_hang: d.lich_di_hang || "",
+      tench: d.tench || "", // ← đổi ten_ch -> tench
+    });
+  });
+
+  return data.map((item) => {
+    const key = normalizeMaCh(item.maNXD);
+    const info = machInfoMap.get(key);
+    if (!info) return item;
+
+    // Nơi Xuất Đến: ưu tiên "mã CH - tên CH" tra được từ DataCH,
+    // nếu DataCH không có tên thì giữ nguyên giá trị Excel đã nhập.
+    const noiXuatDenTuDataCH = info.tench // ← đổi ten_ch -> tench
+      ? `${(item.maNXD || "").toString().trim()}-${info.tench}` // ← đổi ten_ch -> tench
+      : "";
+
+    return {
+      ...item,
+      chuyen: info.chuyen || item.chuyen || "",
+      lichDiHang: info.lich_di_hang || item.lichDiHang || "",
+      noiXuatDen: noiXuatDenTuDataCH || item.noiXuatDen || "",
+    };
+  });
+};
 // Helper: nhận vào mảng document NhanSuSoan (hoặc 1 document), trả về bản có kèm
 // thông tin nhân viên (ten_nhan_vien, bo_phan, chuc_vu) cho nvSoan/nvKC
 const ganThongTinNhanVien = async (docs) => {
@@ -69,67 +126,109 @@ const importManyNhanSuSoan = async (req, res) => {
         .json({ message: "Dữ liệu import phải là mảng và không được rỗng" });
     }
 
-    // Chuẩn hoá danh sách số đơn hàng để kiểm tra trùng
-    const soDonHangList = data.map((it) =>
-      (it.soDonHang || "").toString().trim(),
-    );
+    const skipped = []; // { soDonHang, reason }
+    const validData = [];
 
-    if (soDonHangList.some((code) => !code)) {
-      return res.status(400).json({
-        message:
-          "Có dòng thiếu số đơn hàng (soDonHang), vui lòng kiểm tra lại file.",
-      });
-    }
-
-    // 1) Kiểm tra trùng ngay trong file import (không phân biệt hoa/thường)
-    const seen = new Map();
-    const dupInFileSet = new Set();
-    soDonHangList.forEach((code) => {
-      const key = code.toUpperCase();
-      if (seen.has(key)) dupInFileSet.add(code);
-      else seen.set(key, code);
+    // 1) Loại các dòng thiếu số đơn hàng
+    data.forEach((item) => {
+      const code = (item.soDonHang || "").toString().trim();
+      if (!code) {
+        skipped.push({ soDonHang: "(trống)", reason: "Thiếu số đơn hàng" });
+      } else {
+        validData.push({ ...item, soDonHang: code });
+      }
     });
 
-    if (dupInFileSet.size > 0) {
-      return res.status(400).json({
-        message: `Phát hiện ${dupInFileSet.size} số đơn hàng bị trùng ngay trong file import`,
-        duplicates: Array.from(dupInFileSet),
+    // 2) Loại các dòng trùng NGAY TRONG FILE (chỉ giữ dòng đầu tiên, không phân biệt hoa/thường)
+    const seenInFile = new Map();
+    const dedupedData = [];
+    validData.forEach((item) => {
+      const key = item.soDonHang.toUpperCase();
+      if (seenInFile.has(key)) {
+        skipped.push({
+          soDonHang: item.soDonHang,
+          reason: "Trùng trong file import (chỉ giữ dòng đầu tiên)",
+        });
+      } else {
+        seenInFile.set(key, true);
+        dedupedData.push(item);
+      }
+    });
+
+    // 3) Loại các dòng đã tồn tại trong hệ thống
+    let toInsert = dedupedData;
+    if (dedupedData.length > 0) {
+      const codesToCheck = dedupedData.map((it) => it.soDonHang);
+      const existing = await NhanSuSoan.find({
+        soDonHang: { $in: codesToCheck },
+      })
+        .collation({ locale: "vi", strength: 2 })
+        .select("soDonHang")
+        .lean();
+
+      if (existing.length > 0) {
+        const existingKeySet = new Set(
+          existing.map((e) => e.soDonHang.toUpperCase()),
+        );
+        toInsert = [];
+        dedupedData.forEach((item) => {
+          if (existingKeySet.has(item.soDonHang.toUpperCase())) {
+            skipped.push({
+              soDonHang: item.soDonHang,
+              reason: "Đã tồn tại trong hệ thống",
+            });
+          } else {
+            toInsert.push(item);
+          }
+        });
+      }
+    }
+
+    if (toInsert.length === 0) {
+      return res.status(200).json({
+        message: `Không có phiếu nào hợp lệ để import. Đã bỏ qua ${skipped.length} phiếu.`,
+        inserted: [],
+        skipped,
       });
     }
 
-    // 2) Kiểm tra trùng với dữ liệu đã có sẵn trong hệ thống (không phân biệt hoa/thường)
-    const existing = await NhanSuSoan.find({
-      soDonHang: { $in: soDonHangList },
-    })
-      .collation({ locale: "vi", strength: 2 })
-      .select("soDonHang")
-      .lean();
+    const dataWithChuyenLichDiHang =
+      await ganThongTinTuDataCHTheoMaCh(toInsert);
 
-    if (existing.length > 0) {
-      const existingCodes = existing.map((e) => e.soDonHang);
-      return res.status(409).json({
-        message: `${existingCodes.length} số đơn hàng đã tồn tại trong hệ thống, không thể import`,
-        duplicates: existingCodes,
+    let result = [];
+    try {
+      result = await NhanSuSoan.insertMany(dataWithChuyenLichDiHang, {
+        ordered: false,
       });
+    } catch (insertError) {
+      // Một số dòng có thể lỗi do trùng key ở tầng DB (race condition) -
+      // vẫn lấy các dòng insert thành công, dòng lỗi coi như bị bỏ qua
+      if (insertError.insertedDocs) {
+        result = insertError.insertedDocs;
+      } else {
+        throw insertError;
+      }
+      if (Array.isArray(insertError.writeErrors)) {
+        insertError.writeErrors.forEach((we) => {
+          skipped.push({
+            soDonHang: we.err?.op?.soDonHang || "(?)",
+            reason: "Lỗi khi lưu (có thể trùng số đơn hàng)",
+          });
+        });
+      }
     }
 
-    const result = await NhanSuSoan.insertMany(data, { ordered: false });
     res.status(201).json({
-      message: `Đã thêm ${result.length} phiếu thành công`,
-      data: result,
+      message: `Đã thêm ${result.length} phiếu thành công${
+        skipped.length > 0 ? `, bỏ qua ${skipped.length} phiếu` : ""
+      }`,
+      inserted: result,
+      skipped,
     });
   } catch (error) {
-    // Trùng key do unique index (nếu có) ở tầng DB
-    if (error.code === 11000) {
-      return res.status(409).json({
-        message: "Có số đơn hàng bị trùng trong hệ thống",
-        error: error.message,
-      });
-    }
     res.status(500).json({
       message: "Lỗi khi import phiếu",
       error: error.message,
-      inserted: error.insertedDocs || undefined,
     });
   }
 };
