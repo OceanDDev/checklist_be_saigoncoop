@@ -32,6 +32,12 @@ const nhanVienSchema = new mongoose.Schema(
       trim: true,
       uppercase: true,
     },
+      ma_phu: {
+      type: String,
+      unique: true,
+      trim: true,
+      uppercase: true,
+    },
     ten_nhan_vien: {
       type: String,
       required: true,

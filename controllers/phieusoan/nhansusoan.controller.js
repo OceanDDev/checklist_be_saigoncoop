@@ -65,40 +65,64 @@ const ganThongTinNhanVien = async (docs) => {
   const isArray = Array.isArray(docs);
   const list = isArray ? docs : [docs];
 
-  const allMaNV = new Set();
+  const allMa = new Set();
   list.forEach((doc) => {
-    (doc.nvSoan || []).forEach((ma) => allMaNV.add(ma));
-    (doc.nvKC || []).forEach((ma) => allMaNV.add(ma));
+    (doc.nvSoan || []).forEach((ma) => allMa.add(ma));
+    (doc.nvKC || []).forEach((ma) => allMa.add(ma));
   });
 
-  if (allMaNV.size === 0) {
+  if (allMa.size === 0) {
     return isArray ? list : list[0];
   }
 
+  const maList = Array.from(allMa);
+
   const nhanViens = await NhanVien.find({
-    ma_nhan_vien: { $in: Array.from(allMaNV) },
+    $or: [{ ma_nhan_vien: { $in: maList } }, { ma_phu: { $in: maList } }],
   }).lean();
 
-  const nvMap = {};
+  const resolveMap = {};
   nhanViens.forEach((nv) => {
-    nvMap[nv.ma_nhan_vien] = {
+    resolveMap[nv.ma_nhan_vien] = {
       ma_nhan_vien: nv.ma_nhan_vien,
       ten_nhan_vien: nv.ten_nhan_vien,
       bo_phan: nv.bo_phan,
       chuc_vu: nv.chuc_vu,
+      via: "chinh",
     };
+    if (nv.ma_phu) {
+      resolveMap[nv.ma_phu] = {
+        ma_nhan_vien: nv.ma_nhan_vien, // vẫn quy về mã chính -> dùng để GỘP số liệu
+        ten_nhan_vien: nv.ten_nhan_vien,
+        bo_phan: nv.bo_phan,
+        chuc_vu: nv.chuc_vu,
+        via: "phu",
+      };
+    }
   });
+
+  const resolveOne = (maGoc) => {
+    const info = resolveMap[maGoc] || {
+      ma_nhan_vien: maGoc,
+      ten_nhan_vien: "(Không tìm thấy)",
+      bo_phan: "",
+      chuc_vu: "",
+      via: "chinh",
+    };
+    return {
+      ma_nhan_vien: info.ma_nhan_vien, // ✅ mã CHÍNH — dùng để gộp số liệu/KPI
+      ma_hien_thi: maGoc, // ✅ mã ĐÃ NHẬP GỐC trên phiếu (chính hoặc phụ) — dùng để HIỂN THỊ
+      ten_nhan_vien: info.ten_nhan_vien,
+      bo_phan: info.bo_phan,
+      chuc_vu: info.chuc_vu,
+      via_ma_phu: info.via === "phu",
+    };
+  };
 
   const ketQua = list.map((doc) => {
     const obj = doc.toObject ? doc.toObject() : doc;
-    obj.nvSoanChiTiet = (obj.nvSoan || []).map(
-      (ma) =>
-        nvMap[ma] || { ma_nhan_vien: ma, ten_nhan_vien: "(Không tìm thấy)" },
-    );
-    obj.nvKCChiTiet = (obj.nvKC || []).map(
-      (ma) =>
-        nvMap[ma] || { ma_nhan_vien: ma, ten_nhan_vien: "(Không tìm thấy)" },
-    );
+    obj.nvSoanChiTiet = (obj.nvSoan || []).map((ma) => resolveOne(ma));
+    obj.nvKCChiTiet = (obj.nvKC || []).map((ma) => resolveOne(ma));
     return obj;
   });
 
