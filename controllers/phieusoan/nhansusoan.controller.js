@@ -266,6 +266,7 @@ const getAllNhanSuSoan = async (req, res) => {
       soDonHang,
       soPhieuGop,
       trangThai,
+      trangThaiBookXe,
       maNXD,
       noiXuatDen,
       chuyen,
@@ -285,6 +286,7 @@ const getAllNhanSuSoan = async (req, res) => {
     if (soDonHang) filter.soDonHang = { $regex: soDonHang, $options: "i" };
     if (soPhieuGop) filter.soPhieuGop = { $regex: soPhieuGop, $options: "i" };
     if (trangThai) filter.trangThai = trangThai;
+    if (trangThaiBookXe) filter.trangThaiBookXe = trangThaiBookXe;  
     if (maNXD) filter.maNXD = { $regex: maNXD, $options: "i" };
     if (noiXuatDen) filter.noiXuatDen = { $regex: noiXuatDen, $options: "i" };
     if (chuyen) filter.chuyen = { $regex: chuyen, $options: "i" };
@@ -482,7 +484,39 @@ const deleteAllNhanSuSoan = async (req, res) => {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
+// ─── Cập nhật trạng thái Book Xe cho nhiều phiếu ──────────────────────────────
+// body: { ids: [...], trangThaiBookXe: "Chờ Book" | "Chờ Xe" | "Hoàn thành" }
+const updateTrangThaiBookXe = async (req, res) => {
+  try {
+    const { ids, trangThaiBookXe } = req.body;
 
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "Cần truyền mảng 'ids' và không được rỗng" });
+    }
+
+    const validValues = ["Chờ Book", "Chờ Xe", "Hoàn thành"];
+    if (!validValues.includes(trangThaiBookXe)) {
+      return res.status(400).json({
+        message: `trangThaiBookXe không hợp lệ. Giá trị cho phép: ${validValues.join(", ")}`,
+      });
+    }
+
+    const result = await NhanSuSoan.updateMany(
+      { _id: { $in: ids } },
+      { $set: { trangThaiBookXe } },
+      { runValidators: true },
+    );
+
+    res.status(200).json({
+      message: `Đã cập nhật trạng thái Book Xe cho ${result.modifiedCount} phiếu`,
+      result,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
 module.exports = {
   createNhanSuSoan,
   importManyNhanSuSoan,
@@ -493,4 +527,5 @@ module.exports = {
   deleteNhanSuSoan,
   deleteManyNhanSuSoan,
   deleteAllNhanSuSoan,
+  updateTrangThaiBookXe
 };
