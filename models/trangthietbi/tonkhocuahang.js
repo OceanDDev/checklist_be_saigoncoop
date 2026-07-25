@@ -41,10 +41,10 @@ const tonKhoCuaHangSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    // Có thể âm: cửa hàng trả dư (tong_tra > ton_dau_ky + tong_giao)
     ton_cuoi_ky: {
       type: Number,
       default: 0,
-      min: 0,
     },
   },
   {
@@ -53,9 +53,6 @@ const tonKhoCuaHangSchema = new mongoose.Schema(
 );
 
 // Mỗi cửa hàng + loại TTB + kỳ chỉ có duy nhất 1 record
-tonKhoCuaHangSchema.index(
-  { ma_ch: 1, loai_ttb: 1, ky: 1 },
-  { unique: true },
-);
+tonKhoCuaHangSchema.index({ ma_ch: 1, loai_ttb: 1, ky: 1 }, { unique: true });
 
 module.exports = mongoose.model("TonKhoCuaHang", tonKhoCuaHangSchema);
