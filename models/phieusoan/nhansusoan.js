@@ -56,6 +56,11 @@ const nhanSuSoanSchema = new mongoose.Schema(
     tgNhanPhieu: {
       type: Date,
     },
+     trangThaiBookXe: {
+      type: String,
+      enum: ["Chờ Book", "Chờ Xe", "Hoàn thành"],
+      default: "Chờ Book",
+    },
   },
   { timestamps: true }
 );
