@@ -5,14 +5,11 @@ const QuanLyHD = require("../../models/quanlyhd/quanlyhd");
 
 // ==== CẤU HÌNH CÓ THỂ CHỈNH ====
 // [PERF] Tăng 3000 -> 5000: ít round-trip bulkWrite hơn, giảm overhead network tới DB
-const CHUNK_SIZE = 5000;
+// [PERF-2] Sau khi bỏ bước findExistingWmsKeys (xem upsertHdBatch), có thể tăng thêm nữa
+// (thử 8000-10000) vì không còn tốn query $or nhiều điều kiện trước mỗi batch.
+const CHUNK_SIZE = 8000;
 const MAX_HEADER_SCAN_ROWS = 20; // quét tối đa bấy nhiêu dòng đầu để tìm header thật (file HD có 5 dòng tiêu đề)
 const MAX_DETAIL_ENTRIES = 500; // giới hạn số dòng lỗi/bỏ qua trả về chi tiết, tránh response quá nặng
-// [PERF] Tăng 500 -> 1000 + query song song (xem findExistingWmsKeys) thay vì tuần tự
-const CHECK_CHUNK = 1000;
-// [PERF] Số query chạy song song cùng lúc khi kiểm tra key đã tồn tại, tránh mở quá nhiều
-// connection cùng lúc làm nghẽn DB (giữ vừa đủ để tận dụng pool connection của mongoose)
-const CHECK_CONCURRENCY = 5;
 
 // Trạng thái riêng: khi FE lọc đúng trạng thái này -> trả về TẤT CẢ (không phân trang)
 const TRANG_THAI_HIEN_THI_HET = "Không khớp lượng";
@@ -414,78 +411,104 @@ async function upsertWmsBatch(batch, stats) {
 }
 
 /**
- * Kiểm tra trước xem các cặp {ma_ch, sku, so_phieu_wms} nào đã tồn tại document (do WMS tạo).
- * [PERF] Query các chunk SONG SONG (giới hạn CHECK_CONCURRENCY cùng lúc) thay vì tuần tự từng
- * chunk một -> giảm đáng kể tổng thời gian chờ khi file HĐ có nhiều dòng (network round-trip
- * là phần tốn thời gian nhất, chạy song song tận dụng được connection pool của mongoose).
- * Trả về Set các key dạng "ma_ch|sku|so_phieu_wms" đã tồn tại.
- */
-async function findExistingWmsKeys(triples) {
-  const foundSet = new Set();
-
-  const chunks = [];
-  for (let i = 0; i < triples.length; i += CHECK_CHUNK) {
-    chunks.push(triples.slice(i, i + CHECK_CHUNK));
-  }
-
-  const runChunk = async (chunk) => {
-    if (chunk.length === 0) return;
-    const orConds = chunk.map((t) => ({
-      ma_ch: t.ma_ch,
-      sku: t.sku,
-      so_phieu_wms: t.so_phieu_wms,
-    }));
-    const docs = await QuanLyHD.find(
-      { $or: orConds },
-      { ma_ch: 1, sku: 1, so_phieu_wms: 1, _id: 0 },
-    ).lean();
-    for (const d of docs) {
-      foundSet.add(`${d.ma_ch}|${d.sku}|${d.so_phieu_wms}`);
-    }
-  };
-
-  // [PERF] Chạy song song theo từng nhóm CHECK_CONCURRENCY chunk, không bung hết 1 lần
-  // để tránh mở quá nhiều connection cùng lúc tới MongoDB
-  for (let i = 0; i < chunks.length; i += CHECK_CONCURRENCY) {
-    const group = chunks.slice(i, i + CHECK_CONCURRENCY);
-    await Promise.all(group.map(runChunk));
-  }
-
-  return foundSet;
-}
-
-/**
- * Gắn dữ liệu Hóa Đơn vào ĐÚNG document phiếu WMS đã tồn tại (match theo {ma_ch, sku, so_phieu}).
+ * [PERF-2] Upsert batch từ file HĐ - GỘP thành 1 bulkWrite pipeline duy nhất,
+ * KHÔNG còn query kiểm tra tồn tại trước (đã bỏ hẳn findExistingWmsKeys).
  *
- * Nếu 1 dòng HĐ KHÔNG tìm thấy phiếu WMS tương ứng (do gõ sai so_phieu, hoặc WMS chưa import),
- * dòng đó KHÔNG bị bỏ qua nữa mà được LƯU thành 1 document riêng với trangThai = "No Data WMS"
- * (dùng so_phieu_hd làm luôn so_phieu_wms trong khóa {ma_ch, sku, so_phieu_wms} -> nếu sau này
- * phiếu WMS đúng của dòng này được import, upsertWmsBatch sẽ tự tìm thấy và update vào ĐÚNG
- * document này, không tạo trùng).
+ * Trước đây: mỗi batch phải query $or (nhiều điều kiện) để biết doc WMS đã tồn tại
+ * chưa, rồi mới tách matched/unmatched và chạy 2 bulkWrite riêng -> tốn tới 3 round-trip
+ * DB / batch, và $or nhiều điều kiện là kiểu query không tối ưu với index.
  *
- * skuNameMap: Map<sku, tên hàng> dựng từ dữ liệu WMS trong CÙNG lần import (xem finalizeWmsDoc).
- * Dùng để điền tạm "Tên hàng" cho các document "No Data WMS" (vì file HĐ không có cột tên hàng),
- * có fallback tra thêm trong DB nếu SKU chưa gặp trong lần import WMS này.
+ * Giờ đây: dùng ĐÚNG kỹ thuật giống upsertWmsBatch — filter theo
+ * {ma_ch, sku, so_phieu_wms: so_phieu_hd}, upsert:true, và dùng $ifNull trên $luong_wms
+ * (field chỉ có nếu doc WMS đã tồn tại từ trước) để MongoDB tự phân biệt:
+ *   - Nếu $luong_wms đã có sẵn -> đây là update vào doc WMS có sẵn (matched)
+ *   - Nếu không (doc mới toanh do upsert tạo ra) -> "No Data WMS"
+ * Chỉ còn 1 round-trip DB / batch.
+ *
+ * bulkWrite result.upsertedIds cho biết CHÍNH XÁC index nào trong batch bị "No Data WMS"
+ * (được tạo mới) -> dùng để build lại unmatchedDetails mà không cần query riêng.
  */
 async function upsertHdBatch(batch, stats, skuNameMap) {
   if (batch.length === 0) return;
 
-  const triples = batch.map((doc) => ({
-    ma_ch: doc.ma_ch,
-    sku: doc.sku,
-    so_phieu_wms: doc.so_phieu_hd, // so với so_phieu_wms đã lưu sẵn từ lần import WMS
-  }));
-  const foundSet = await findExistingWmsKeys(triples);
+  // Tra tên hàng cho các SKU chưa có trong skuNameMap (từ DB, phòng trường hợp SKU này
+  // chưa từng xuất hiện trong dữ liệu WMS của lần import hiện tại). $ifNull trong pipeline
+  // bên dưới sẽ chỉ dùng giá trị này khi doc là MỚI (chưa có "name" sẵn từ WMS).
+  const missingSkus = [
+    ...new Set(batch.filter((d) => !skuNameMap.has(d.sku)).map((d) => d.sku)),
+  ];
+  if (missingSkus.length > 0) {
+    const existingNamed = await QuanLyHD.find(
+      { sku: { $in: missingSkus }, name: { $nin: [null, ""] } },
+      { sku: 1, name: 1, _id: 0 },
+    ).lean();
+    for (const d of existingNamed) {
+      if (!skuNameMap.has(d.sku)) skuNameMap.set(d.sku, d.name);
+    }
+  }
 
-  const matchedBatch = [];
-  const noDataWmsBatch = [];
-  for (const doc of batch) {
-    const key = `${doc.ma_ch}|${doc.sku}|${doc.so_phieu_hd}`;
-    if (foundSet.has(key)) {
-      matchedBatch.push(doc);
-    } else {
-      noDataWmsBatch.push(doc);
-      stats.unmatchedRows = (stats.unmatchedRows || 0) + 1;
+  const ops = batch.map((doc) => ({
+    updateOne: {
+      filter: {
+        ma_ch: doc.ma_ch,
+        sku: doc.sku,
+        so_phieu_wms: doc.so_phieu_hd, // so với so_phieu_wms đã lưu sẵn từ lần import WMS
+      },
+      update: [
+        {
+          $set: {
+            ma_ch: doc.ma_ch,
+            sku: doc.sku,
+            so_phieu_wms: doc.so_phieu_hd,
+            so_hoa_don: doc.so_hoa_don,
+            tf_sd_hd: doc.tf_sd_hd,
+            so_phieu_hd: doc.so_phieu_hd,
+            ten_ch_hd: doc.ten_ch_hd,
+            luong_hd: doc.luong_hd,
+            ngay_hoa_don: doc.ngay_hoa_don,
+            ngay_import: new Date(),
+            // Giữ nguyên "name" nếu doc đã tồn tại (đến từ WMS); chỉ điền tạm tên hàng
+            // nếu doc này MỚI được tạo ở đây (không có $name trước đó -> null -> dùng fallback)
+            name: { $ifNull: ["$name", skuNameMap.get(doc.sku) || ""] },
+          },
+        },
+        {
+          $set: {
+            trangThai: {
+              $cond: [
+                // $luong_wms chỉ có giá trị nếu doc WMS đã tồn tại từ trước (không phải doc mới upsert)
+                { $eq: [{ $ifNull: ["$luong_wms", null] }, null] },
+                "No Data WMS",
+                {
+                  $cond: [
+                    { $eq: ["$luong_wms", "$luong_hd"] },
+                    "Hoàn thành",
+                    "Không khớp lượng",
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      ],
+      upsert: true,
+    },
+  }));
+
+  const recordStats = (result) => {
+    stats.matched += result.matchedCount || 0;
+    stats.modified += result.modifiedCount || 0;
+
+    // upsertedIds: map { batchIndex: _id } cho các op phải TẠO MỚI doc (= không khớp WMS)
+    const upsertedIds = result.upsertedIds || {};
+    const unmatchedIndices = Object.keys(upsertedIds).map(Number);
+    stats.unmatchedRows = (stats.unmatchedRows || 0) + unmatchedIndices.length;
+    stats.noDataWmsCreated =
+      (stats.noDataWmsCreated || 0) + unmatchedIndices.length;
+
+    for (const idx of unmatchedIndices) {
+      const doc = batch[idx];
+      if (!doc) continue;
       if (stats.unmatchedDetails.length < MAX_DETAIL_ENTRIES) {
         stats.unmatchedDetails.push({
           rowNumber: doc._rowNumber,
@@ -498,167 +521,36 @@ async function upsertHdBatch(batch, stats, skuNameMap) {
         });
       }
     }
-  }
+  };
 
-  // ---- Nhánh 1: match được phiếu WMS -> update vào document đã có sẵn ----
-  if (matchedBatch.length > 0) {
-    const ops = matchedBatch.map((doc) => ({
-      updateOne: {
-        filter: {
-          ma_ch: doc.ma_ch,
-          sku: doc.sku,
-          so_phieu_wms: doc.so_phieu_hd,
-        },
-        update: [
-          {
-            $set: {
-              so_hoa_don: doc.so_hoa_don,
-              tf_sd_hd: doc.tf_sd_hd,
-              so_phieu_hd: doc.so_phieu_hd,
-              ten_ch_hd: doc.ten_ch_hd,
-              luong_hd: doc.luong_hd,
-              ngay_hoa_don: doc.ngay_hoa_don,
-              ngay_import: new Date(),
-            },
-          },
-          {
-            $set: {
-              // Đã match theo so_phieu ở bước kiểm tra trước rồi -> chỉ cần so luong.
-              trangThai: {
-                $cond: [
-                  { $eq: ["$luong_wms", "$luong_hd"] },
-                  "Hoàn thành",
-                  "Không khớp lượng",
-                ],
-              },
-            },
-          },
-        ],
-        upsert: false,
-      },
-    }));
+  try {
+    const result = await QuanLyHD.bulkWrite(ops, { ordered: false });
+    recordStats(result);
+  } catch (err) {
+    // Với ordered:false, MongoDB vẫn thực hiện các op không lỗi -> lấy số liệu thành công từ err.result
+    const partialResult = err.result || {};
+    recordStats(partialResult);
 
-    try {
-      const result = await QuanLyHD.bulkWrite(ops, { ordered: false });
-      stats.modified += result.modifiedCount || 0;
-      stats.matched += result.matchedCount || 0;
-    } catch (err) {
-      const partialResult = err.result || {};
-      stats.modified += partialResult.modifiedCount || 0;
-      stats.matched += partialResult.matchedCount || 0;
-
-      const writeErrors = err.writeErrors || partialResult.writeErrors || [];
-      for (const we of writeErrors) {
-        const failedDoc = matchedBatch[we.index] || {};
-        if (stats.errorDetails.length < MAX_DETAIL_ENTRIES) {
-          stats.errorDetails.push({
-            rowNumber: failedDoc._rowNumber,
-            ma_ch: failedDoc.ma_ch,
-            sku: failedDoc.sku,
-            so_hoa_don: failedDoc.so_hoa_don,
-            code: we.code,
-            message:
-              we.errmsg || (we.err && we.err.errmsg) || "Lỗi ghi dữ liệu",
-          });
-        }
-      }
-
-      stats.errors.push({
-        message: err.message,
-        code: err.code,
-        writeErrorsCount: writeErrors.length,
-      });
-    }
-  }
-
-  // ---- Nhánh 2: KHÔNG match được phiếu WMS -> tạo document mới, trangThai "No Data WMS" ----
-  if (noDataWmsBatch.length > 0) {
-    // Với các SKU chưa có tên trong skuNameMap của lần import này (WMS chưa từng gặp SKU đó
-    // trong lần import hiện tại), tra thêm trong DB xem có document nào khác của SKU đó đã
-    // từng được import WMS trước đây và có sẵn tên hàng không.
-    const missingSkus = [
-      ...new Set(
-        noDataWmsBatch.filter((d) => !skuNameMap.has(d.sku)).map((d) => d.sku),
-      ),
-    ];
-    if (missingSkus.length > 0) {
-      const existingNamed = await QuanLyHD.find(
-        { sku: { $in: missingSkus }, name: { $nin: [null, ""] } },
-        { sku: 1, name: 1, _id: 0 },
-      ).lean();
-      for (const d of existingNamed) {
-        if (!skuNameMap.has(d.sku)) skuNameMap.set(d.sku, d.name);
+    const writeErrors = err.writeErrors || partialResult.writeErrors || [];
+    for (const we of writeErrors) {
+      const failedDoc = batch[we.index] || {};
+      if (stats.errorDetails.length < MAX_DETAIL_ENTRIES) {
+        stats.errorDetails.push({
+          rowNumber: failedDoc._rowNumber,
+          ma_ch: failedDoc.ma_ch,
+          sku: failedDoc.sku,
+          so_hoa_don: failedDoc.so_hoa_don,
+          code: we.code,
+          message: we.errmsg || (we.err && we.err.errmsg) || "Lỗi ghi dữ liệu",
+        });
       }
     }
 
-    const noDataOps = noDataWmsBatch.map((doc) => {
-      const resolvedName = skuNameMap.get(doc.sku) || "";
-      return {
-        updateOne: {
-          filter: {
-            ma_ch: doc.ma_ch,
-            sku: doc.sku,
-            so_phieu_wms: doc.so_phieu_hd,
-          },
-          update: {
-            $set: {
-              ma_ch: doc.ma_ch,
-              sku: doc.sku,
-              // Điền tạm tên hàng nếu tra được (từ WMS cùng lần import hoặc DB cũ);
-              // để trống nếu SKU này chưa từng có dữ liệu WMS nào -> sẽ tự khớp tên sau
-              // khi phiếu WMS đúng được import.
-              name: resolvedName,
-              so_phieu_wms: doc.so_phieu_hd,
-              so_hoa_don: doc.so_hoa_don,
-              tf_sd_hd: doc.tf_sd_hd,
-              so_phieu_hd: doc.so_phieu_hd,
-              ten_ch_hd: doc.ten_ch_hd,
-              luong_hd: doc.luong_hd,
-              ngay_hoa_don: doc.ngay_hoa_don,
-              ngay_import: new Date(),
-              trangThai: "No Data WMS",
-            },
-          },
-          upsert: true,
-        },
-      };
+    stats.errors.push({
+      message: err.message,
+      code: err.code,
+      writeErrorsCount: writeErrors.length,
     });
-
-    try {
-      const result = await QuanLyHD.bulkWrite(noDataOps, { ordered: false });
-      stats.noDataWmsCreated =
-        (stats.noDataWmsCreated || 0) + (result.upsertedCount || 0);
-      stats.modified += result.modifiedCount || 0;
-      stats.matched += result.matchedCount || 0;
-    } catch (err) {
-      const partialResult = err.result || {};
-      stats.noDataWmsCreated =
-        (stats.noDataWmsCreated || 0) + (partialResult.upsertedCount || 0);
-      stats.modified += partialResult.modifiedCount || 0;
-      stats.matched += partialResult.matchedCount || 0;
-
-      const writeErrors = err.writeErrors || partialResult.writeErrors || [];
-      for (const we of writeErrors) {
-        const failedDoc = noDataWmsBatch[we.index] || {};
-        if (stats.errorDetails.length < MAX_DETAIL_ENTRIES) {
-          stats.errorDetails.push({
-            rowNumber: failedDoc._rowNumber,
-            ma_ch: failedDoc.ma_ch,
-            sku: failedDoc.sku,
-            so_hoa_don: failedDoc.so_hoa_don,
-            code: we.code,
-            message:
-              we.errmsg || (we.err && we.err.errmsg) || "Lỗi ghi dữ liệu",
-          });
-        }
-      }
-
-      stats.errors.push({
-        message: err.message,
-        code: err.code,
-        writeErrorsCount: writeErrors.length,
-      });
-    }
   }
 }
 
