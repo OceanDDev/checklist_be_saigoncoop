@@ -2,7 +2,7 @@
 const mongoose = require("mongoose");
 
 const BO_PHAN_CHUC_VU = {
-  "Ngọc Phú": ["Kiểm chéo", "Soạn hàng", "Hỗ trợ xuất","Tăng Ca Soạn"],
+  "Nhà Cung Cấp": ["Kiểm chéo", "Soạn hàng", "Hỗ trợ xuất","Tăng Ca Soạn"],
   "Xuất hàng": [
     "Xử lý đơn hàng TV",
     "Soạn hàng CT",

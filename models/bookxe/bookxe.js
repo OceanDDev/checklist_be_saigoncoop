@@ -3,7 +3,12 @@ const mongoose = require("mongoose");
 const bookXeSchema = new mongoose.Schema(
   {
     thoi_gian_xuat: {
-      type: String,
+      type: Date,
+      required: true,
+      trim: true,
+    },
+    thoi_gian_dk_toi_ch: {
+      type: Date,
       required: true,
       trim: true,
     },
@@ -40,15 +45,21 @@ const bookXeSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+
+    kien_rot: {
+      type: Number,
+      default: 0,
+    },
+
     trangThai: {
       type: String,
-      enum: ["Chưa Book", "Chờ xe", "Hoàn thành"],
-      default: "Chưa soạn",
+      enum: ["Chưa Book", "Chờ xe","Có kiện rớt", "Hoàn thành"],
+      default: "Chưa Book",
     },
-    tgImport: {
+    thoi_gian_tao: {
       type: Date,
     },
-    tgHoanThanh: {
+    thoi_gian_hoan_thanh: {
       type: Date,
     },
   },

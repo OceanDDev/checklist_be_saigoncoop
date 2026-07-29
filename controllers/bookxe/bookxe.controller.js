@@ -1,6 +1,5 @@
 const BookXe = require("../../models/bookxe/bookxe"); // chỉnh lại path cho đúng vị trí model thực tế
 
-
 const getAllBookXe = async (req, res) => {
   try {
     const {
@@ -61,7 +60,13 @@ const getAllBookXe = async (req, res) => {
     });
   } catch (error) {
     console.error("getAllBookXe error:", error);
-    return res.status(500).json({ success: false, message: "Lỗi lấy danh sách book xe", error: error.message });
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: "Lỗi lấy danh sách book xe",
+        error: error.message,
+      });
   }
 };
 
@@ -72,13 +77,21 @@ const getBookXeById = async (req, res) => {
     const item = await BookXe.findById(id);
 
     if (!item) {
-      return res.status(404).json({ success: false, message: "Không tìm thấy phiếu book xe" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy phiếu book xe" });
     }
 
     return res.status(200).json({ success: true, data: item });
   } catch (error) {
     console.error("getBookXeById error:", error);
-    return res.status(500).json({ success: false, message: "Lỗi lấy phiếu book xe", error: error.message });
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: "Lỗi lấy phiếu book xe",
+        error: error.message,
+      });
   }
 };
 
@@ -88,20 +101,34 @@ const createBookXe = async (req, res) => {
     const payload = req.body;
 
     if (!payload.thoi_gian_xuat) {
-      return res.status(400).json({ success: false, message: "Thiếu thời gian xuất" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Thiếu thời gian xuất" });
     }
 
     const newItem = new BookXe({
       ...payload,
-      tgImport: new Date(),
+      thoi_gian_tao: new Date(),
     });
 
     await newItem.save();
 
-    return res.status(201).json({ success: true, message: "Tạo phiếu book xe thành công", data: newItem });
+    return res
+      .status(201)
+      .json({
+        success: true,
+        message: "Tạo phiếu book xe thành công",
+        data: newItem,
+      });
   } catch (error) {
     console.error("createBookXe error:", error);
-    return res.status(500).json({ success: false, message: "Lỗi tạo phiếu book xe", error: error.message });
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: "Lỗi tạo phiếu book xe",
+        error: error.message,
+      });
   }
 };
 
@@ -117,13 +144,23 @@ const updateBookXe = async (req, res) => {
     });
 
     if (!updated) {
-      return res.status(404).json({ success: false, message: "Không tìm thấy phiếu book xe" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy phiếu book xe" });
     }
 
-    return res.status(200).json({ success: true, message: "Cập nhật thành công", data: updated });
+    return res
+      .status(200)
+      .json({ success: true, message: "Cập nhật thành công", data: updated });
   } catch (error) {
     console.error("updateBookXe error:", error);
-    return res.status(500).json({ success: false, message: "Lỗi cập nhật phiếu book xe", error: error.message });
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: "Lỗi cập nhật phiếu book xe",
+        error: error.message,
+      });
   }
 };
 
@@ -135,24 +172,40 @@ const updateTrangThai = async (req, res) => {
 
     const validStatuses = ["Chưa Book", "Chờ xe", "Hoàn thành"];
     if (!validStatuses.includes(trangThai)) {
-      return res.status(400).json({ success: false, message: "Trạng thái không hợp lệ" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Trạng thái không hợp lệ" });
     }
 
     const update = { trangThai };
     if (trangThai === "Hoàn thành") {
-      update.tgHoanThanh = new Date();
+      update.thoi_gian_hoan_thanh = new Date();
     }
 
     const updated = await BookXe.findByIdAndUpdate(id, update, { new: true });
 
     if (!updated) {
-      return res.status(404).json({ success: false, message: "Không tìm thấy phiếu book xe" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy phiếu book xe" });
     }
 
-    return res.status(200).json({ success: true, message: "Cập nhật trạng thái thành công", data: updated });
+    return res
+      .status(200)
+      .json({
+        success: true,
+        message: "Cập nhật trạng thái thành công",
+        data: updated,
+      });
   } catch (error) {
     console.error("updateTrangThai error:", error);
-    return res.status(500).json({ success: false, message: "Lỗi cập nhật trạng thái", error: error.message });
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: "Lỗi cập nhật trạng thái",
+        error: error.message,
+      });
   }
 };
 
@@ -163,13 +216,21 @@ const deleteBookXe = async (req, res) => {
     const deleted = await BookXe.findByIdAndDelete(id);
 
     if (!deleted) {
-      return res.status(404).json({ success: false, message: "Không tìm thấy phiếu book xe" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy phiếu book xe" });
     }
 
     return res.status(200).json({ success: true, message: "Xóa thành công" });
   } catch (error) {
     console.error("deleteBookXe error:", error);
-    return res.status(500).json({ success: false, message: "Lỗi xóa phiếu book xe", error: error.message });
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: "Lỗi xóa phiếu book xe",
+        error: error.message,
+      });
   }
 };
 
@@ -179,22 +240,36 @@ const deleteManyBookXe = async (req, res) => {
     const { ids } = req.body;
 
     if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ success: false, message: "Danh sách id không hợp lệ" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Danh sách id không hợp lệ" });
     }
 
     const result = await BookXe.deleteMany({ _id: { $in: ids } });
 
-    return res.status(200).json({ success: true, message: "Xóa thành công", deletedCount: result.deletedCount });
+    return res
+      .status(200)
+      .json({
+        success: true,
+        message: "Xóa thành công",
+        deletedCount: result.deletedCount,
+      });
   } catch (error) {
     console.error("deleteManyBookXe error:", error);
-    return res.status(500).json({ success: false, message: "Lỗi xóa nhiều phiếu book xe", error: error.message });
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: "Lỗi xóa nhiều phiếu book xe",
+        error: error.message,
+      });
   }
 };
 
 module.exports = {
   getAllBookXe,
   getBookXeById,
-  createBookXe,
+  createBookXe, 
   updateBookXe,
   updateTrangThai,
   deleteBookXe,
