@@ -1,44 +1,58 @@
 const express = require("express");
 const router = express.Router();
 
-const {
-  getAllBookXe,
-  getBookXeById,
-  createBookXe,
-  updateBookXe,
-  updateTrangThai,
-  deleteBookXe,
-  deleteManyBookXe,
-} = require("../../controllers/bookxe/bookxe.controller"); // chỉnh lại path cho đúng vị trí controller thực tế
+const bookXeController = require("../../controllers/bookxe/bookxe.controller"); // chỉnh lại path cho đúng vị trí controller thực tế
+const historyBookXeController = require("../../controllers/bookxe/historyBookXe.controller"); // chỉnh lại path cho đúng vị trí controller thực tế
+const { verifyToken } = require("../../middlewares/authMiddleware"); // chỉnh lại path cho đúng vị trí middleware thực tế
 
-const {
-  getAllHistoryBookXe,
-  getHistoryBookXeById,
-  createHistoryBookXe,
-  importManyHistoryBookXe,
-  updateHistoryBookXe,
-  deleteHistoryBookXe,
-  deleteManyHistoryBookXe,
-} = require("../../controllers/bookxe/historybookxe.controller"); // chỉnh lại path cho đúng vị trí controller thực tế
+// ── BookXe (admin - cần login) ───────────────────────────────────────────────
+router.get("/bookxe", verifyToken, bookXeController.getAllBookXe);
+router.get("/bookxe/:id", verifyToken, bookXeController.getBookXeById);
+router.post("/bookxe", verifyToken, bookXeController.createBookXe);
+router.put("/bookxe/:id", verifyToken, bookXeController.updateBookXe);
+router.patch(
+  "/bookxe/:id/trang-thai",
+  verifyToken,
+  bookXeController.updateTrangThai,
+);
+router.delete("/bookxe/:id", verifyToken, bookXeController.deleteBookXe);
+router.delete("/bookxe", verifyToken, bookXeController.deleteManyBookXe);
 
-// (nếu có middleware auth, thêm vào đây, vd: const { verifyToken } = require("../middleware/auth");)
-
-// ============ BookXe ============
-router.get("/bookxe/", getAllBookXe);
-router.get("/bookxe/:id", getBookXeById);
-router.post("/bookxe/", createBookXe);
-router.put("/bookxe/:id", updateBookXe);
-router.patch("/bookxe/:id/trang-thai", updateTrangThai);
-router.delete("/bookxe/:id", deleteBookXe);
-router.delete("/bookxe/", deleteManyBookXe);
-
-// ============ HistoryBookXe ============
-router.get("/historybookxe/", getAllHistoryBookXe);
-router.get("/historybookxe/:id", getHistoryBookXeById);
-router.post("/historybookxe/", createHistoryBookXe);
-router.post("/historybookxe/import-many", importManyHistoryBookXe);
-router.put("/historybookxe/:id", updateHistoryBookXe);
-router.delete("/historybookxe/:id", deleteHistoryBookXe);
-router.delete("/historybookxe/", deleteManyHistoryBookXe);
+// ── HistoryBookXe (admin - cần login) ────────────────────────────────────────
+router.get(
+  "/historybookxe",
+  verifyToken,
+  historyBookXeController.getAllHistoryBookXe,
+);
+router.get(
+  "/historybookxe/:id",
+  verifyToken,
+  historyBookXeController.getHistoryBookXeById,
+);
+router.post(
+  "/historybookxe",
+  verifyToken,
+  historyBookXeController.createHistoryBookXe,
+);
+router.post(
+  "/historybookxe/import-many",
+  verifyToken,
+  historyBookXeController.importManyHistoryBookXe,
+);
+router.put(
+  "/historybookxe/:id",
+  verifyToken,
+  historyBookXeController.updateHistoryBookXe,
+);
+router.delete(
+  "/historybookxe/:id",
+  verifyToken,
+  historyBookXeController.deleteHistoryBookXe,
+);
+router.delete(
+  "/historybookxe",
+  verifyToken,
+  historyBookXeController.deleteManyHistoryBookXe,
+);
 
 module.exports = router;

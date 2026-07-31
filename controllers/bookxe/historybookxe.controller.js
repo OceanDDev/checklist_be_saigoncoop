@@ -1,4 +1,4 @@
-const HistoryBookXe = require("../../models/bookxe/historyBookXe"); // chỉnh lại path cho đúng vị trí model thực tế
+const HistoryBookXe = require("../../models/bookxe/historybookxe"); // chỉnh lại path cho đúng vị trí model thực tế
 
 // GET /api/history-book-xe
 const getAllHistoryBookXe = async (req, res) => {

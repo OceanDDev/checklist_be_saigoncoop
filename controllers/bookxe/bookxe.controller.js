@@ -1,5 +1,4 @@
-const BookXe = require("../../models/bookxe/bookxe"); // chỉnh lại path cho đúng vị trí model thực tế
-
+const BookXe = require("../../models/bookxe/bookxe");
 const getAllBookXe = async (req, res) => {
   try {
     const {

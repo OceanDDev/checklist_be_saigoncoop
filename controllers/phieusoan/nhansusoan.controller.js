@@ -15,6 +15,32 @@ const normalizeMaCh = (raw) => {
   return s.toUpperCase();
 };
 
+// ─── Helper: lọc khoảng ngày luôn theo giờ VN (UTC+7), không phụ thuộc TZ server ─
+const VN_OFFSET = "+07:00";
+
+const startOfDayVN = (dateStr) => {
+  if (!dateStr) return null;
+  const d = new Date(`${dateStr}T00:00:00.000${VN_OFFSET}`);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const endOfDayVN = (dateStr) => {
+  if (!dateStr) return null;
+  const d = new Date(`${dateStr}T23:59:59.999${VN_OFFSET}`);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+/** Gắn điều kiện lọc khoảng ngày (giờ VN) cho 1 field ngày vào object filter,
+ *  chỉ thêm nếu có ít nhất 1 trong 2 mốc tuNgay/denNgay hợp lệ. */
+const applyDateRangeFilter = (filter, field, tuNgay, denNgay) => {
+  const range = {};
+  const start = startOfDayVN(tuNgay);
+  const end = endOfDayVN(denNgay);
+  if (start) range.$gte = start;
+  if (end) range.$lte = end;
+  if (Object.keys(range).length > 0) filter[field] = range;
+};
+
 const ganThongTinTuDataCHTheoMaCh = async (data) => {
   const maChSet = new Set();
   data.forEach((item) => {
@@ -43,17 +69,24 @@ const ganThongTinTuDataCHTheoMaCh = async (data) => {
   return data.map((item) => {
     const key = normalizeMaCh(item.maNXD);
     const info = machInfoMap.get(key);
-    if (!info) return item;
 
-    // Nơi Xuất Đến: ưu tiên "mã CH - tên CH" tra được từ DataCH,
-    // nếu DataCH không có tên thì giữ nguyên giá trị Excel đã nhập.
-    const noiXuatDenTuDataCH = info.tench // ← đổi ten_ch -> tench
-      ? `${(item.maNXD || "").toString().trim()}-${info.tench}` // ← đổi ten_ch -> tench
+    // Chuyến: nếu người dùng đã điền trong file thì ưu tiên dùng giá trị đó,
+    // ngược lại lấy mặc định từ DataCH theo Mã NXĐ. Luôn chuẩn hoá viết HOA.
+    const chuyenNhapTay = (item.chuyen || "").toString().trim();
+    const chuyenMacDinh = info?.chuyen || "";
+    const chuyenFinal = (chuyenNhapTay || chuyenMacDinh || "").toUpperCase();
+
+    if (!info) {
+      return { ...item, chuyen: chuyenFinal };
+    }
+
+    const noiXuatDenTuDataCH = info.tench
+      ? `${(item.maNXD || "").toString().trim()}-${info.tench}`
       : "";
 
     return {
       ...item,
-      chuyen: info.chuyen || item.chuyen || "",
+      chuyen: chuyenFinal,
       lichDiHang: info.lich_di_hang || item.lichDiHang || "",
       noiXuatDen: noiXuatDenTuDataCH || item.noiXuatDen || "",
     };
@@ -158,9 +191,17 @@ const importManyNhanSuSoan = async (req, res) => {
       const code = (item.soDonHang || "").toString().trim();
       if (!code) {
         skipped.push({ soDonHang: "(trống)", reason: "Thiếu số đơn hàng" });
-      } else {
-        validData.push({ ...item, soDonHang: code });
+        return;
       }
+      const codeUpper = code.toUpperCase();
+      if (!codeUpper.startsWith("SO") && !codeUpper.startsWith("TO")) {
+        skipped.push({
+          soDonHang: code,
+          reason: "Số đơn hàng phải bắt đầu bằng SO hoặc TO",
+        });
+        return;
+      }
+      validData.push({ ...item, soDonHang: code });
     });
 
     // 2) Loại các dòng trùng NGAY TRONG FILE (chỉ giữ dòng đầu tiên, không phân biệt hoa/thường)
@@ -218,10 +259,14 @@ const importManyNhanSuSoan = async (req, res) => {
 
     const dataWithChuyenLichDiHang =
       await ganThongTinTuDataCHTheoMaCh(toInsert);
+    const dataWithTgImport = dataWithChuyenLichDiHang.map((item) => ({
+      ...item,
+      tgImport: new Date(),
+    }));
 
     let result = [];
     try {
-      result = await NhanSuSoan.insertMany(dataWithChuyenLichDiHang, {
+      result = await NhanSuSoan.insertMany(dataWithTgImport, {
         ordered: false,
       });
     } catch (insertError) {
@@ -282,66 +327,67 @@ const getAllNhanSuSoan = async (req, res) => {
     } = req.query;
 
     const filter = {};
+    const andConditions = [];
+    const buildArrayFieldCondition = (field, value) => {
+      const v = (value || "").toString().trim();
+      if (!v) return null;
+      if (v === "!") {
+        return {
+          $or: [
+            { [field]: { $exists: false } },
+            { [field]: null },
+            { [field]: { $size: 0 } },
+          ],
+        };
+      }
+      return { [field]: { $regex: v, $options: "i" } };
+    };
 
     if (soDonHang) filter.soDonHang = { $regex: soDonHang, $options: "i" };
     if (soPhieuGop) filter.soPhieuGop = { $regex: soPhieuGop, $options: "i" };
     if (trangThai) filter.trangThai = trangThai;
-    if (trangThaiBookXe) filter.trangThaiBookXe = trangThaiBookXe;  
+    if (trangThaiBookXe) filter.trangThaiBookXe = trangThaiBookXe;
     if (maNXD) filter.maNXD = { $regex: maNXD, $options: "i" };
     if (noiXuatDen) filter.noiXuatDen = { $regex: noiXuatDen, $options: "i" };
     if (chuyen) filter.chuyen = { $regex: chuyen, $options: "i" };
-    // lichDiHang là text (VD: "T7/CN", "T2"), không phải ngày tháng
-    // -> lọc kiểu "chứa chuỗi", KHÔNG lọc theo khoảng ngày (tuNgay/denNgay)
     if (lichDiHang) filter.lichDiHang = { $regex: lichDiHang, $options: "i" };
-    // nvSoan/nvKC là mảng mã nhân viên -> regex trên field mảng sẽ khớp
-    // nếu BẤT KỲ phần tử nào trong mảng chứa chuỗi tìm kiếm
-    if (nvSoan) filter.nvSoan = { $regex: nvSoan, $options: "i" };
-    if (nvKC) filter.nvKC = { $regex: nvKC, $options: "i" };
 
-    // Lọc khoảng ngày theo TG import (tgImport) — tuNgay/denNgay dạng "YYYY-MM-DD"
-    if (tuNgay || denNgay) {
-      filter.tgImport = {};
-      if (tuNgay) {
-        const start = new Date(`${tuNgay}T00:00:00.000`);
-        if (!Number.isNaN(start.getTime())) filter.tgImport.$gte = start;
+    const nvSoanCond = buildArrayFieldCondition("nvSoan", nvSoan);
+    if (nvSoanCond) andConditions.push(nvSoanCond);
+    const nvKCCond = buildArrayFieldCondition("nvKC", nvKC);
+    if (nvKCCond) andConditions.push(nvKCCond);
+
+    // ✅ FIX: nếu request có truyền tuNgayNP/denNgayNP và/hoặc tuNgayHT/denNgayHT
+    // (màn hình Năng suất cần cả 2 field cùng lúc để không phải refetch khi
+    // đổi tab vai trò Soạn/KC), thì OR 2 điều kiện lại với nhau — một phiếu
+    // được lấy về nếu tgNhanPhieu HOẶC tgHoanThanh rơi vào đúng khoảng ngày.
+    // Nếu chỉ truyền tuNgay/denNgay như cũ (không truyền NP/HT) thì vẫn giữ
+    // hành vi cũ: lọc theo tgImport, không đổi để tránh phá các chỗ khác
+    // đang dùng field tuNgay/denNgay cho mục đích lọc theo TG import.
+    const hasNPRange = tuNgayNP || denNgayNP;
+    const hasHTRange = tuNgayHT || denNgayHT;
+
+    if (hasNPRange || hasHTRange) {
+      const orConditions = [];
+      if (hasNPRange) {
+        const npFilter = {};
+        applyDateRangeFilter(npFilter, "tgNhanPhieu", tuNgayNP, denNgayNP);
+        if (npFilter.tgNhanPhieu) orConditions.push(npFilter);
       }
-      if (denNgay) {
-        const end = new Date(`${denNgay}T23:59:59.999`);
-        if (!Number.isNaN(end.getTime())) filter.tgImport.$lte = end;
+      if (hasHTRange) {
+        const htFilter = {};
+        applyDateRangeFilter(htFilter, "tgHoanThanh", tuNgayHT, denNgayHT);
+        if (htFilter.tgHoanThanh) orConditions.push(htFilter);
       }
-      if (Object.keys(filter.tgImport).length === 0) delete filter.tgImport;
+      if (orConditions.length > 0) andConditions.push({ $or: orConditions });
+    } else {
+      // hành vi cũ: lọc theo tgImport khi chỉ có tuNgay/denNgay
+      applyDateRangeFilter(filter, "tgImport", tuNgay, denNgay);
     }
 
-    // Lọc khoảng ngày theo TG hoàn thành (tgHoanThanh)
-    if (tuNgayHT || denNgayHT) {
-      filter.tgHoanThanh = {};
-      if (tuNgayHT) {
-        const start = new Date(`${tuNgayHT}T00:00:00.000`);
-        if (!Number.isNaN(start.getTime())) filter.tgHoanThanh.$gte = start;
-      }
-      if (denNgayHT) {
-        const end = new Date(`${denNgayHT}T23:59:59.999`);
-        if (!Number.isNaN(end.getTime())) filter.tgHoanThanh.$lte = end;
-      }
-      if (Object.keys(filter.tgHoanThanh).length === 0)
-        delete filter.tgHoanThanh;
+    if (andConditions.length > 0) {
+      filter.$and = andConditions;
     }
-
-    // Lọc khoảng ngày theo TG nhận phiếu (tgNhanPhieu)
-    if (tuNgayNP || denNgayNP) {
-      filter.tgNhanPhieu = {};
-      if (tuNgayNP) {
-        const start = new Date(`${tuNgayNP}T00:00:00.000`);
-        if (!Number.isNaN(start.getTime())) filter.tgNhanPhieu.$gte = start;
-      }
-      if (denNgayNP) {
-        const end = new Date(`${denNgayNP}T23:59:59.999`);
-        if (!Number.isNaN(end.getTime())) filter.tgNhanPhieu.$lte = end;
-      }
-      if (Object.keys(filter.tgNhanPhieu).length === 0)
-        delete filter.tgNhanPhieu;
-    }
-
     const skip = (Number(page) - 1) * Number(limit);
 
     const [itemsRaw, total] = await Promise.all([
@@ -364,7 +410,6 @@ const getAllNhanSuSoan = async (req, res) => {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
-
 // ─── Lấy 1 phiếu theo id ──────────────────────────────────────────────────────
 const getNhanSuSoanById = async (req, res) => {
   try {
@@ -383,14 +428,33 @@ const getNhanSuSoanById = async (req, res) => {
 const updateNhanSuSoan = async (req, res) => {
   try {
     const { id } = req.params;
+    const body = { ...req.body };
+    delete body.tgImport;
+    delete body.tgHoanThanh;
+    delete body.tgNhanPhieu;
+
+    if (body.trangThai) {
+      const current = await NhanSuSoan.findById(id).select(
+        "trangThai tgNhanPhieu",
+      );
+      if (!current)
+        return res.status(404).json({ message: "Không tìm thấy phiếu" });
+
+      if (body.trangThai === "Đang soạn" && !current.tgNhanPhieu) {
+        body.tgNhanPhieu = new Date();
+      }
+      if (body.trangThai === "Hoàn thành") {
+        body.tgHoanThanh = new Date();
+      }
+    }
+
     const updated = await NhanSuSoan.findByIdAndUpdate(
       id,
-      { $set: req.body },
+      { $set: body },
       { new: true, runValidators: true },
     );
     if (!updated)
       return res.status(404).json({ message: "Không tìm thấy phiếu" });
-
     res.status(200).json({ message: "Cập nhật thành công", data: updated });
   } catch (error) {
     res.status(500).json({ message: "Lỗi server", error: error.message });
@@ -398,34 +462,40 @@ const updateNhanSuSoan = async (req, res) => {
 };
 
 // ─── Cập nhật nhiều phiếu ─────────────────────────────────────────────────────
-// body: { ids: [...], data: {...} }  -> áp cùng nội dung cho nhiều phiếu
-// hoặc  { updates: [ { id, data }, ... ] } -> mỗi phiếu 1 nội dung khác nhau
 const updateManyNhanSuSoan = async (req, res) => {
   try {
     const { ids, data, updates } = req.body;
+    const now = new Date(); // 1 mốc chung cho cả batch
+
+    const stamp = (payload) => {
+      const clean = { ...payload };
+      delete clean.tgImport;
+      delete clean.tgHoanThanh;
+      delete clean.tgNhanPhieu;
+      if (clean.trangThai === "Hoàn thành") clean.tgHoanThanh = now;
+      if (clean.trangThai === "Đang soạn") clean.tgNhanPhieu = now;
+      return clean;
+    };
 
     if (Array.isArray(ids) && ids.length > 0 && data) {
       const result = await NhanSuSoan.updateMany(
         { _id: { $in: ids } },
-        { $set: data },
+        { $set: stamp(data) },
         { runValidators: true },
       );
-      return res.status(200).json({
-        message: `Đã cập nhật ${result.modifiedCount} phiếu`,
-        result,
-      });
+      return res
+        .status(200)
+        .json({ message: `Đã cập nhật ${result.modifiedCount} phiếu`, result });
     }
 
     if (Array.isArray(updates) && updates.length > 0) {
       const bulkOps = updates.map(({ id, data }) => ({
-        updateOne: { filter: { _id: id }, update: { $set: data } },
+        updateOne: { filter: { _id: id }, update: { $set: stamp(data) } },
       }));
-
       const result = await NhanSuSoan.bulkWrite(bulkOps);
-      return res.status(200).json({
-        message: `Đã cập nhật ${result.modifiedCount} phiếu`,
-        result,
-      });
+      return res
+        .status(200)
+        .json({ message: `Đã cập nhật ${result.modifiedCount} phiếu`, result });
     }
 
     res.status(400).json({
@@ -527,5 +597,5 @@ module.exports = {
   deleteNhanSuSoan,
   deleteManyNhanSuSoan,
   deleteAllNhanSuSoan,
-  updateTrangThaiBookXe
+  updateTrangThaiBookXe,
 };
