@@ -171,7 +171,74 @@ const createNhanSuSoan = async (req, res) => {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
+// ─── Helper dùng chung: lọc dòng thiếu/sai số đơn hàng + loại trùng trong
+// file + loại trùng với DB. Dùng lại cho cả import thường và import Phân Bổ. ─
+const locVaLoaiTrungKhiImport = async (data) => {
+  const skipped = []; // { soDonHang, reason }
+  const validData = [];
 
+  data.forEach((item) => {
+    const code = (item.soDonHang || "").toString().trim();
+    if (!code) {
+      skipped.push({ soDonHang: "(trống)", reason: "Thiếu số đơn hàng" });
+      return;
+    }
+    const codeUpper = code.toUpperCase();
+    if (!codeUpper.startsWith("SO") && !codeUpper.startsWith("TO")) {
+      skipped.push({
+        soDonHang: code,
+        reason: "Số đơn hàng phải bắt đầu bằng SO hoặc TO",
+      });
+      return;
+    }
+    validData.push({ ...item, soDonHang: code });
+  });
+
+  const seenInFile = new Map();
+  const dedupedData = [];
+  validData.forEach((item) => {
+    const key = item.soDonHang.toUpperCase();
+    if (seenInFile.has(key)) {
+      skipped.push({
+        soDonHang: item.soDonHang,
+        reason: "Trùng trong file import (chỉ giữ dòng đầu tiên)",
+      });
+    } else {
+      seenInFile.set(key, true);
+      dedupedData.push(item);
+    }
+  });
+
+  let toInsert = dedupedData;
+  if (dedupedData.length > 0) {
+    const codesToCheck = dedupedData.map((it) => it.soDonHang);
+    const existing = await NhanSuSoan.find({
+      soDonHang: { $in: codesToCheck },
+    })
+      .collation({ locale: "vi", strength: 2 })
+      .select("soDonHang")
+      .lean();
+
+    if (existing.length > 0) {
+      const existingKeySet = new Set(
+        existing.map((e) => e.soDonHang.toUpperCase()),
+      );
+      toInsert = [];
+      dedupedData.forEach((item) => {
+        if (existingKeySet.has(item.soDonHang.toUpperCase())) {
+          skipped.push({
+            soDonHang: item.soDonHang,
+            reason: "Đã tồn tại trong hệ thống",
+          });
+        } else {
+          toInsert.push(item);
+        }
+      });
+    }
+  }
+
+  return { toInsert, skipped };
+};
 // ─── Thêm nhiều phiếu (import) ────────────────────────────────────────────────
 const importManyNhanSuSoan = async (req, res) => {
   try {
@@ -587,6 +654,77 @@ const updateTrangThaiBookXe = async (req, res) => {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
+const importPhanBo = async (req, res) => {
+  try {
+    const { data } = req.body;
+
+    if (!Array.isArray(data) || data.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "Dữ liệu import phải là mảng và không được rỗng" });
+    }
+
+    const { toInsert, skipped } = await locVaLoaiTrungKhiImport(data);
+
+    if (toInsert.length === 0) {
+      return res.status(200).json({
+        message: `Không có phiếu nào hợp lệ để import. Đã bỏ qua ${skipped.length} phiếu.`,
+        inserted: [],
+        skipped,
+      });
+    }
+
+    // Vẫn dùng DataCH để tự điền Nơi Xuất Đến/Lịch Đi Hàng theo Mã NXĐ.
+    // Chuyến sẽ bị ép lại thành "PHÂN BỔ" ngay sau bước này, nên không cần lo
+    // giá trị chuyen mặc định từ DataCH bị dùng nhầm.
+    const dataWithDataCH = await ganThongTinTuDataCHTheoMaCh(toInsert);
+
+    const now = new Date(); // 1 mốc chung cho toàn bộ batch — tgImport =
+    // tgHoanThanh = tgNhanPhieu vì phiếu Phân Bổ đã xong sẵn.
+    const dataFinal = dataWithDataCH.map((item) => ({
+      ...item,
+      chuyen: "PHÂN BỔ",
+      trangThai: "Hoàn thành",
+      trangThaiBookXe: "Hoàn thành",
+      tgImport: now,
+      tgHoanThanh: now,
+      tgNhanPhieu: now,
+    }));
+
+    let result = [];
+    try {
+      result = await NhanSuSoan.insertMany(dataFinal, { ordered: false });
+    } catch (insertError) {
+      if (insertError.insertedDocs) {
+        result = insertError.insertedDocs;
+      } else {
+        throw insertError;
+      }
+      if (Array.isArray(insertError.writeErrors)) {
+        insertError.writeErrors.forEach((we) => {
+          skipped.push({
+            soDonHang: we.err?.op?.soDonHang || "(?)",
+            reason: "Lỗi khi lưu (có thể trùng số đơn hàng)",
+          });
+        });
+      }
+    }
+
+    res.status(201).json({
+      message: `Đã import ${result.length} phiếu Phân Bổ thành công${
+        skipped.length > 0 ? `, bỏ qua ${skipped.length} phiếu` : ""
+      }`,
+      inserted: result,
+      skipped,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Lỗi khi import Phân Bổ",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createNhanSuSoan,
   importManyNhanSuSoan,
@@ -598,4 +736,7 @@ module.exports = {
   deleteManyNhanSuSoan,
   deleteAllNhanSuSoan,
   updateTrangThaiBookXe,
+  importPhanBo,
+  locVaLoaiTrungKhiImport,
+  ganThongTinTuDataCHTheoMaCh,  // 👈 thêm dòng này
 };

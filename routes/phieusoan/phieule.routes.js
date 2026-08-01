@@ -17,6 +17,7 @@ const {
   deleteNhanSuSoan,
   deleteManyNhanSuSoan,
   deleteAllNhanSuSoan,
+  importPhanBo  
 } = require("../../controllers/phieusoan/nhansusoan.controller"); 
 
 // ===== MULTER CONFIG =====
@@ -74,6 +75,7 @@ router.delete("/dataCH/:id", verifyToken, dataCHController.deleteDataCH);
 
 // ===== NHÂN SỰ SOẠN ROUTES =====
 router.delete("/nhansusoan/delete-all", verifyToken, deleteAllNhanSuSoan);
+router.post("/nhansusoan/import-phanbo",verifyToken, importPhanBo)
 router.get("/nhansusoan", verifyToken, getAllNhanSuSoan);
 router.get("/nhansusoan/:id", verifyToken, getNhanSuSoanById);
 router.post("/nhansusoan", verifyToken, createNhanSuSoan);
