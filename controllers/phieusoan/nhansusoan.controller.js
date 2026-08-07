@@ -654,7 +654,8 @@ const updateTrangThaiBookXe = async (req, res) => {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
-const importPhanBo = async (req, res) => {
+
+const importUpdateNhanSuSoan = async (req, res) => {
   try {
     const { data } = req.body;
 
@@ -664,62 +665,131 @@ const importPhanBo = async (req, res) => {
         .json({ message: "Dữ liệu import phải là mảng và không được rỗng" });
     }
 
-    const { toInsert, skipped } = await locVaLoaiTrungKhiImport(data);
+    const skipped = []; // { soDonHang, reason }
+    const validData = [];
 
-    if (toInsert.length === 0) {
+    // 1) Loại dòng thiếu số đơn hàng
+    data.forEach((item) => {
+      const code = (item.soDonHang || "").toString().trim();
+      if (!code) {
+        skipped.push({ soDonHang: "(trống)", reason: "Thiếu số đơn hàng" });
+        return;
+      }
+      validData.push({ ...item, soDonHang: code });
+    });
+
+    // 2) Loại trùng trong file (chỉ giữ dòng đầu tiên)
+    const seenInFile = new Map();
+    const dedupedData = [];
+    validData.forEach((item) => {
+      const key = item.soDonHang.toUpperCase();
+      if (seenInFile.has(key)) {
+        skipped.push({
+          soDonHang: item.soDonHang,
+          reason: "Trùng trong file import (chỉ giữ dòng đầu tiên)",
+        });
+      } else {
+        seenInFile.set(key, true);
+        dedupedData.push(item);
+      }
+    });
+
+    if (dedupedData.length === 0) {
       return res.status(200).json({
-        message: `Không có phiếu nào hợp lệ để import. Đã bỏ qua ${skipped.length} phiếu.`,
-        inserted: [],
+        message: `Không có phiếu nào hợp lệ để cập nhật. Đã bỏ qua ${skipped.length} phiếu.`,
+        matchedCount: 0,
+        modifiedCount: 0,
         skipped,
       });
     }
 
-    // Vẫn dùng DataCH để tự điền Nơi Xuất Đến/Lịch Đi Hàng theo Mã NXĐ.
-    // Chuyến sẽ bị ép lại thành "PHÂN BỔ" ngay sau bước này, nên không cần lo
-    // giá trị chuyen mặc định từ DataCH bị dùng nhầm.
-    const dataWithDataCH = await ganThongTinTuDataCHTheoMaCh(toInsert);
+    // 3) Tìm các đơn ĐÃ TỒN TẠI trong hệ thống theo soDonHang, lấy kèm
+    // tgNhanPhieu hiện tại để quyết định có set lại hay không.
+    const codesToCheck = dedupedData.map((it) => it.soDonHang);
+    const existingDocs = await NhanSuSoan.find({
+      soDonHang: { $in: codesToCheck },
+    })
+      .collation({ locale: "vi", strength: 2 })
+      .select("soDonHang tgNhanPhieu")
+      .lean();
 
-    const now = new Date(); // 1 mốc chung cho toàn bộ batch — tgImport =
-    // tgHoanThanh = tgNhanPhieu vì phiếu Phân Bổ đã xong sẵn.
-    const dataFinal = dataWithDataCH.map((item) => ({
-      ...item,
-      chuyen: "PHÂN BỔ",
-      trangThai: "Hoàn thành",
-      trangThaiBookXe: "Hoàn thành",
-      tgImport: now,
-      tgHoanThanh: now,
-      tgNhanPhieu: now,
-    }));
+    const existingMap = new Map();
+    existingDocs.forEach((d) => {
+      existingMap.set(d.soDonHang.toUpperCase(), d);
+    });
 
-    let result = [];
-    try {
-      result = await NhanSuSoan.insertMany(dataFinal, { ordered: false });
-    } catch (insertError) {
-      if (insertError.insertedDocs) {
-        result = insertError.insertedDocs;
-      } else {
-        throw insertError;
-      }
-      if (Array.isArray(insertError.writeErrors)) {
-        insertError.writeErrors.forEach((we) => {
-          skipped.push({
-            soDonHang: we.err?.op?.soDonHang || "(?)",
-            reason: "Lỗi khi lưu (có thể trùng số đơn hàng)",
-          });
+    const toUpdate = [];
+    dedupedData.forEach((item) => {
+      const existing = existingMap.get(item.soDonHang.toUpperCase());
+      if (!existing) {
+        skipped.push({
+          soDonHang: item.soDonHang,
+          reason: "Không tìm thấy số đơn hàng trong hệ thống",
         });
+        return;
       }
+      toUpdate.push({
+        ...item, // giữ nguyên maNXD, soPhieuGop, nvSoan, nvKC, kien, dong từ file
+        tgNhanPhieu: existing.tgNhanPhieu, // giá trị hiện có trong DB (có thể null)
+      });
+    });
+
+    if (toUpdate.length === 0) {
+      return res.status(200).json({
+        message: `Không có phiếu nào để cập nhật. Đã bỏ qua ${skipped.length} phiếu.`,
+        matchedCount: 0,
+        modifiedCount: 0,
+        skipped,
+      });
     }
 
-    res.status(201).json({
-      message: `Đã import ${result.length} phiếu Phân Bổ thành công${
+    // Tự điền lại Nơi Xuất Đến/Lịch Đi Hàng theo Mã NXĐ (đồng bộ với các
+    // luồng import khác) — vì maNXD có thể đã thay đổi so với lúc tạo phiếu.
+    const dataWithDataCH = await ganThongTinTuDataCHTheoMaCh(toUpdate);
+
+    const now = new Date(); // 1 mốc chung cho cả batch
+
+    const bulkOps = dataWithDataCH.map((item) => {
+      const setPayload = {
+        maNXD: item.maNXD,
+        soPhieuGop: item.soPhieuGop,
+        nvSoan: item.nvSoan,
+        nvKC: item.nvKC,
+        kien: item.kien,
+        dong: item.dong,
+        chuyen: item.chuyen,
+        noiXuatDen: item.noiXuatDen,
+        lichDiHang: item.lichDiHang,
+        trangThai: "Hoàn thành",
+        tgHoanThanh: now,
+      };
+      if (!item.tgNhanPhieu) {
+        setPayload.tgNhanPhieu = now; // chưa có -> set = thời điểm import
+      }
+      // đã có tgNhanPhieu -> không đưa vào $set, giữ nguyên giá trị cũ
+
+      return {
+        updateOne: {
+          filter: { soDonHang: item.soDonHang },
+          collation: { locale: "vi", strength: 2 },
+          update: { $set: setPayload },
+        },
+      };
+    });
+
+    const result = await NhanSuSoan.bulkWrite(bulkOps, { ordered: false });
+
+    res.status(200).json({
+      message: `Đã cập nhật ${result.modifiedCount} phiếu${
         skipped.length > 0 ? `, bỏ qua ${skipped.length} phiếu` : ""
       }`,
-      inserted: result,
+      matchedCount: result.matchedCount,
+      modifiedCount: result.modifiedCount,
       skipped,
     });
   } catch (error) {
     res.status(500).json({
-      message: "Lỗi khi import Phân Bổ",
+      message: "Lỗi khi Import Update",
       error: error.message,
     });
   }
@@ -736,7 +806,7 @@ module.exports = {
   deleteManyNhanSuSoan,
   deleteAllNhanSuSoan,
   updateTrangThaiBookXe,
-  importPhanBo,
+  importUpdateNhanSuSoan,
   locVaLoaiTrungKhiImport,
-  ganThongTinTuDataCHTheoMaCh,  // 👈 thêm dòng này
+  ganThongTinTuDataCHTheoMaCh, // 👈 thêm dòng này
 };
