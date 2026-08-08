@@ -91,6 +91,7 @@ const TonKhoRoutes = require("./routes/tonkho/tonkho.routes.js");
 const QuanLyHDRoutes = require("./routes/quanlyhd/quanlyhd.routes.js");
 const TrangThietBiRoutes = require("./routes/trangthietbi/trangthiebi.routes.js");
 const BookXeRoutes = require("./routes/bookxe/bookxe.routes.js");
+const KhuyenMaiRoutes = require("./routes/khuyenmai/khuyenmai.routes.js");
 
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
@@ -117,6 +118,8 @@ app.use("/api/saigoncoop", TonKhoRoutes);
 app.use("/api/saigoncoop", QuanLyHDRoutes);
 app.use("/api/saigoncoop", TrangThietBiRoutes);
 app.use("/api/saigoncoop", BookXeRoutes);
+app.use("/api/saigoncoop", KhuyenMaiRoutes);
+
 
 app.use((err, req, res, next) => {
   if (err.code === "LIMIT_FILE_SIZE") {
