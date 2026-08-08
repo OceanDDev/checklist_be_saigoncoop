@@ -794,7 +794,179 @@ const importUpdateNhanSuSoan = async (req, res) => {
     });
   }
 };
+const addGiaoKhach = async (req, res) => {
+  try {
+    const { data } = req.body;
 
+    if (!Array.isArray(data) || data.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "Dữ liệu import phải là mảng và không được rỗng" });
+    }
+
+    const skipped = []; // { soDonHang, reason }
+    const validData = [];
+
+    // 1) Validate các field bắt buộc: soDonHang, maNXD, lichDiHang
+    data.forEach((item) => {
+      const code = (item.soDonHang || "").toString().trim();
+      if (!code) {
+        skipped.push({ soDonHang: "(trống)", reason: "Thiếu số đơn hàng" });
+        return;
+      }
+      const maNXD = (item.maNXD || "").toString().trim();
+      if (!maNXD) {
+        skipped.push({ soDonHang: code, reason: "Thiếu Mã NXĐ" });
+        return;
+      }
+      const lichDiHang = (item.lichDiHang || "").toString().trim();
+      if (!lichDiHang) {
+        skipped.push({ soDonHang: code, reason: "Thiếu Lịch Đi Hàng" });
+        return;
+      }
+
+      validData.push({
+        soDonHang: code,
+        maNXD,
+        lichDiHang,
+      });
+    });
+
+    // 2) Loại trùng NGAY TRONG FILE (chỉ giữ dòng đầu tiên)
+    const seenInFile = new Map();
+    const dedupedData = [];
+    validData.forEach((item) => {
+      const key = item.soDonHang.toUpperCase();
+      if (seenInFile.has(key)) {
+        skipped.push({
+          soDonHang: item.soDonHang,
+          reason: "Trùng trong file import (chỉ giữ dòng đầu tiên)",
+        });
+      } else {
+        seenInFile.set(key, true);
+        dedupedData.push(item);
+      }
+    });
+
+    if (dedupedData.length === 0) {
+      return res.status(200).json({
+        message: `Không có phiếu nào hợp lệ để thêm. Đã bỏ qua ${skipped.length} phiếu.`,
+        inserted: [],
+        skipped,
+      });
+    }
+
+    // 3) Loại các dòng đã tồn tại trong hệ thống (chỉ THÊM MỚI, không update)
+    const codesToCheck = dedupedData.map((it) => it.soDonHang);
+    const existing = await NhanSuSoan.find({
+      soDonHang: { $in: codesToCheck },
+    })
+      .collation({ locale: "vi", strength: 2 })
+      .select("soDonHang")
+      .lean();
+
+    let toInsert = dedupedData;
+    if (existing.length > 0) {
+      const existingKeySet = new Set(
+        existing.map((e) => e.soDonHang.toUpperCase()),
+      );
+      toInsert = [];
+      dedupedData.forEach((item) => {
+        if (existingKeySet.has(item.soDonHang.toUpperCase())) {
+          skipped.push({
+            soDonHang: item.soDonHang,
+            reason: "Đã tồn tại trong hệ thống",
+          });
+        } else {
+          toInsert.push(item);
+        }
+      });
+    }
+
+    if (toInsert.length === 0) {
+      return res.status(200).json({
+        message: `Không có phiếu nào hợp lệ để thêm. Đã bỏ qua ${skipped.length} phiếu.`,
+        inserted: [],
+        skipped,
+      });
+    }
+
+    // 4) Tự map tên cửa hàng (noiXuatDen) theo maNXD từ DataCH.
+    // Không dùng ganThongTinTuDataCHTheoMaCh() ở đây vì hàm đó sẽ ghi đè
+    // lichDiHang bằng lich_di_hang mặc định — trong khi lichDiHang ở đây
+    // là field người dùng tự nhập, cần giữ nguyên.
+    const maChSet = new Set();
+    toInsert.forEach((item) => {
+      const key = normalizeMaCh(item.maNXD);
+      if (key) maChSet.add(key);
+    });
+
+    const dataCHDocs =
+      maChSet.size > 0
+        ? await DataCH.find(
+            { mach: { $in: Array.from(maChSet) } },
+            { mach: 1, tench: 1, _id: 0 },
+          ).lean()
+        : [];
+
+    const tenChMap = new Map();
+    dataCHDocs.forEach((d) => {
+      const key = normalizeMaCh(d.mach);
+      if (key) tenChMap.set(key, d.tench || "");
+    });
+
+    const now = new Date();
+
+    const dataFinal = toInsert.map((item) => {
+      const key = normalizeMaCh(item.maNXD);
+      const tench = tenChMap.get(key) || "";
+      const noiXuatDen = tench ? `${item.maNXD}-${tench}` : "";
+
+      return {
+        soDonHang: item.soDonHang,
+        maNXD: item.maNXD,
+        noiXuatDen,
+        chuyen: "GIAO KHÁCH",
+        lichDiHang: item.lichDiHang,
+        trangThai: "Chưa soạn",
+        trangThaiBookXe: "Chờ Book",
+        tgImport: now,
+      };
+    });
+
+    let result = [];
+    try {
+      result = await NhanSuSoan.insertMany(dataFinal, { ordered: false });
+    } catch (insertError) {
+      if (insertError.insertedDocs) {
+        result = insertError.insertedDocs;
+      } else {
+        throw insertError;
+      }
+      if (Array.isArray(insertError.writeErrors)) {
+        insertError.writeErrors.forEach((we) => {
+          skipped.push({
+            soDonHang: we.err?.op?.soDonHang || "(?)",
+            reason: "Lỗi khi lưu (có thể trùng số đơn hàng)",
+          });
+        });
+      }
+    }
+
+    res.status(201).json({
+      message: `Đã thêm ${result.length} phiếu Giao Khách thành công${
+        skipped.length > 0 ? `, bỏ qua ${skipped.length} phiếu` : ""
+      }`,
+      inserted: result,
+      skipped,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Lỗi khi thêm phiếu Giao Khách",
+      error: error.message,
+    });
+  }
+};
 module.exports = {
   createNhanSuSoan,
   importManyNhanSuSoan,
@@ -809,4 +981,5 @@ module.exports = {
   importUpdateNhanSuSoan,
   locVaLoaiTrungKhiImport,
   ganThongTinTuDataCHTheoMaCh, // 👈 thêm dòng này
+  addGiaoKhach,
 };
