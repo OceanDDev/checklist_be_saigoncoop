@@ -25,7 +25,10 @@ const getBangTonKho = async (req, res) => {
     if (ma_ch) filter.ma_ch = ma_ch;
     if (loai_ttb) filter.loai_ttb = loai_ttb;
 
-    const data = await TonKhoCuaHang.find(filter).sort({ ma_ch: 1, loai_ttb: 1 });
+    const data = await TonKhoCuaHang.find(filter).sort({
+      ma_ch: 1,
+      loai_ttb: 1,
+    });
 
     return res.status(200).json({ success: true, data });
   } catch (error) {
@@ -73,7 +76,7 @@ const chotKyTheoCuaHang = async (req, res) => {
           _id: { ma_ch: "$ma_ch", loai_ttb: "$loai_ttb" },
           ten_ch: { $first: "$ten_ch" },
           tong_giao: { $sum: "$ttb_giao" },
-          tong_tra: { $sum: "$ttb_sieu_thi_tra" },
+          tong_tra: { $sum: "$ttb_nhan" },
         },
       },
     ]);

@@ -61,6 +61,10 @@ const nhanSuSoanSchema = new mongoose.Schema(
       enum: ["Chờ Book", "Chờ Xe", "Hoàn thành"],
       default: "Chờ Book",
     },
+    kien_du_kien:{
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );

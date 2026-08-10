@@ -328,6 +328,10 @@ const importManyNhanSuSoan = async (req, res) => {
       await ganThongTinTuDataCHTheoMaCh(toInsert);
     const dataWithTgImport = dataWithChuyenLichDiHang.map((item) => ({
       ...item,
+      kien_du_kien:
+        item.kien_du_kien && Number(item.kien_du_kien) !== 0
+          ? Number(item.kien_du_kien)
+          : 1, // ✅ import vào = 0 (hoặc thiếu) -> mặc định 1
       tgImport: new Date(),
     }));
 
@@ -757,6 +761,10 @@ const importUpdateNhanSuSoan = async (req, res) => {
         nvKC: item.nvKC,
         kien: item.kien,
         dong: item.dong,
+        kien_du_kien:
+          item.kien_du_kien && Number(item.kien_du_kien) !== 0
+            ? Number(item.kien_du_kien)
+            : 1, // ✅ giống rule ở importMany
         chuyen: item.chuyen,
         noiXuatDen: item.noiXuatDen,
         lichDiHang: item.lichDiHang,
@@ -764,9 +772,8 @@ const importUpdateNhanSuSoan = async (req, res) => {
         tgHoanThanh: now,
       };
       if (!item.tgNhanPhieu) {
-        setPayload.tgNhanPhieu = now; // chưa có -> set = thời điểm import
+        setPayload.tgNhanPhieu = now;
       }
-      // đã có tgNhanPhieu -> không đưa vào $set, giữ nguyên giá trị cũ
 
       return {
         updateOne: {

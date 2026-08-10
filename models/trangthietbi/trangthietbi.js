@@ -54,8 +54,7 @@ const trangthietbiSchema = new mongoose.Schema(
     },
 
     ttb_nhan: {
-      type: String,
-      trim: true,
+      type: Number,
     },
 
     // Thiết bị lưu tại siêu thị — cột có trong file đối lưu
