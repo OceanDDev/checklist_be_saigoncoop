@@ -1,4 +1,5 @@
-const BookXe = require("../../models/bookxe/bookxe");
+const BookXe = require("../../models/bookxe/bookxe"); // chỉnh lại path cho đúng vị trí model thực tế
+
 const getAllBookXe = async (req, res) => {
   try {
     const {
@@ -104,8 +105,20 @@ const createBookXe = async (req, res) => {
         .status(400)
         .json({ success: false, message: "Thiếu thời gian xuất" });
     }
+    if (!payload.thoi_gian_dk_toi_ch) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Thiếu thời gian dự kiến tới cửa hàng",
+        });
+    }
 
     const newItem = new BookXe({
+      // trangThai default trong schema hiện đang lệch enum ("Chưa soạn" không nằm
+      // trong ["Chưa Book","Chờ xe","Có kiện rớt","Hoàn thành"]) nên set tay ở đây
+      // để tránh lỗi validation khi payload không truyền trangThai.
+      trangThai: "Chưa Book",
       ...payload,
       thoi_gian_tao: new Date(),
     });
@@ -268,7 +281,7 @@ const deleteManyBookXe = async (req, res) => {
 module.exports = {
   getAllBookXe,
   getBookXeById,
-  createBookXe, 
+  createBookXe,
   updateBookXe,
   updateTrangThai,
   deleteBookXe,

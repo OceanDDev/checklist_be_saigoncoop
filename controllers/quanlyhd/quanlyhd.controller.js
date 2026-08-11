@@ -66,6 +66,17 @@ function extractCellValue(rawValue) {
   }
   return typeof rawValue.toString === "function" ? rawValue.toString() : "";
 }
+async function buildStoreNameMapFromDb() {
+  const rows = await QuanLyHD.aggregate([
+    { $match: { ma_ch: { $ne: "" }, ten_ch_wms: { $ne: "" } } },
+    { $group: { _id: { ma_ch: "$ma_ch", ten_ch_wms: "$ten_ch_wms" } } },
+  ]);
+  const map = new Map();
+  for (const r of rows) {
+    map.set(normalizeStoreName(r._id.ten_ch_wms), r._id.ma_ch);
+  }
+  return map;
+}
 
 /**
  * Parse số dạng "1,234" hoặc số Excel thông thường
@@ -320,6 +331,129 @@ async function processFile(
   await upsertBatchFn(batch, stats);
 }
 
+/**
+ * POST /quanlyhd/import-wms
+ * multipart/form-data với field file: "file_wms"
+ * Độc lập hoàn toàn với import HĐ — có thể import lúc nào cũng được.
+ */
+exports.importWms = async (req, res) => {
+  const fileWms = req.files?.file_wms?.[0];
+  if (!fileWms) {
+    return res.status(400).json({ message: "Cần upload file_wms" });
+  }
+
+  const stats = {
+    totalRows: 0,
+    invalidRows: 0,
+    upserted: 0,
+    modified: 0,
+    matched: 0,
+    errors: [],
+    skippedDetails: [],
+    errorDetails: [],
+  };
+
+  const startTime = Date.now();
+  // finalizeWmsDoc yêu cầu 2 map này nhưng ở luồng import riêng lẻ không cần dùng tới
+  // (chỉ HĐ mới cần tra ngược) -> truyền map rỗng cho gọn, không phải viết lại hàm.
+  const storeNameMap = new Map();
+  const skuNameMap = new Map();
+
+  try {
+    await processFile(
+      fileWms.path,
+      HEADER_MAP_WMS,
+      (raw) => finalizeWmsDoc(raw, storeNameMap, skuNameMap),
+      ["ma_ch", "sku", "so_phieu_wms"],
+      upsertWmsBatch,
+      stats,
+    );
+
+    fs.unlink(fileWms.path, () => {});
+
+    const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+    return res.status(200).json({
+      message: "Import WMS hoàn tất",
+      durationSeconds: durationSec,
+      wms: stats,
+    });
+  } catch (err) {
+    fs.unlink(fileWms.path, () => {});
+    console.error("Lỗi import WMS:", err);
+    return res.status(500).json({
+      message: "Import WMS thất bại",
+      error: err.message,
+      partialStats: stats,
+    });
+  }
+};
+
+/**
+ * POST /quanlyhd/import-hd
+ * multipart/form-data với field file: "file_hd"
+ * Đối chiếu vào các phiếu WMS ĐÃ CÓ SẴN trong DB (từ lần import WMS trước đó, bất kể lúc nào).
+ * Dòng HĐ nào không tìm thấy phiếu WMS tương ứng -> lưu tạm với trạng thái "No Data WMS",
+ * sau này import đúng phiếu WMS vào sẽ tự khớp lại (xem ghi chú trong upsertWmsBatch).
+ */
+exports.importHd = async (req, res) => {
+  const fileHd = req.files?.file_hd?.[0];
+  if (!fileHd) {
+    return res.status(400).json({ message: "Cần upload file_hd" });
+  }
+
+  const stats = {
+    totalRows: 0,
+    invalidRows: 0,
+    resolvedByName: 0,
+    modified: 0,
+    matched: 0,
+    unmatchedRows: 0,
+    noDataWmsCreated: 0,
+    errors: [],
+    skippedDetails: [],
+    unmatchedDetails: [],
+    errorDetails: [],
+  };
+
+  const startTime = Date.now();
+
+  // Dựng lại từ DB thay vì lấy từ bộ nhớ (vì WMS đã import ở 1 request khác, có thể rất lâu rồi)
+  const storeNameMap = await buildStoreNameMapFromDb();
+  // Để trống — upsertHdBatch tự tra DB cho SKU chưa biết tên theo từng batch (đã có sẵn logic này)
+  const skuNameMap = new Map();
+
+  try {
+    await processFile(
+      fileHd.path,
+      HEADER_MAP_HD,
+      (raw) => {
+        const doc = finalizeHdDoc(raw, storeNameMap);
+        if (doc._resolvedByName) stats.resolvedByName += 1;
+        return doc;
+      },
+      ["ma_ch", "sku", "so_phieu_hd"],
+      (batch, s) => upsertHdBatch(batch, s, skuNameMap),
+      stats,
+    );
+
+    fs.unlink(fileHd.path, () => {});
+
+    const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+    return res.status(200).json({
+      message: "Import Hóa Đơn hoàn tất",
+      durationSeconds: durationSec,
+      hd: stats,
+    });
+  } catch (err) {
+    fs.unlink(fileHd.path, () => {});
+    console.error("Lỗi import Hóa Đơn:", err);
+    return res.status(500).json({
+      message: "Import Hóa Đơn thất bại",
+      error: err.message,
+      partialStats: stats,
+    });
+  }
+};
 /**
  * Upsert batch từ file WMS.
  * Mỗi PHIẾU (so_phieu_wms) là 1 document riêng -> filter gồm cả so_phieu_wms,
@@ -691,102 +825,6 @@ exports.getDanhSach = async (req, res) => {
     return res
       .status(500)
       .json({ message: "Lấy danh sách thất bại", error: err.message });
-  }
-};
-
-/**
- * POST /quanlyhd/import
- * multipart/form-data với 2 field file: "file_wms" và "file_hd"
- */
-exports.importQuanLyHD = async (req, res) => {
-  const fileWms = req.files?.file_wms?.[0];
-  const fileHd = req.files?.file_hd?.[0];
-
-  if (!fileWms || !fileHd) {
-    return res
-      .status(400)
-      .json({ message: "Cần upload đủ 2 file: file_wms và file_hd" });
-  }
-
-  const stats = {
-    wms: {
-      totalRows: 0,
-      invalidRows: 0,
-      upserted: 0,
-      modified: 0,
-      matched: 0,
-      errors: [],
-      skippedDetails: [], // chi tiết các dòng bị bỏ qua (thiếu ma_ch/sku/so_phieu_wms), kèm số dòng Excel
-      errorDetails: [], // chi tiết các dòng bị lỗi khi ghi DB (VD trùng khóa)
-    },
-    hd: {
-      totalRows: 0,
-      invalidRows: 0,
-      resolvedByName: 0,
-      modified: 0,
-      matched: 0,
-      unmatchedRows: 0, // số dòng HĐ không tìm thấy phiếu WMS tương ứng (chưa import WMS / so_phieu không khớp)
-      noDataWmsCreated: 0, // số document mới tạo với trạng thái "No Data WMS"
-      errors: [],
-      skippedDetails: [], // chi tiết các dòng bị bỏ qua TRƯỚC khi ghi (thiếu ma_ch/sku/so_phieu_hd)
-      unmatchedDetails: [], // chi tiết các dòng KHÔNG khớp được với phiếu WMS nào (-> lưu "No Data WMS")
-      errorDetails: [], // chi tiết các dòng bị lỗi khi ghi DB
-    },
-  };
-
-  const startTime = Date.now();
-
-  // Bảng tra "tên cửa hàng đã chuẩn hoá -> mã cửa hàng thật", dựng từ dữ liệu WMS,
-  // dùng để tra mã cho các dòng Hóa Đơn không tách được mã từ text (VD "Co.opMart Van Thanh").
-  const storeNameMap = new Map();
-  // Bảng tra "sku -> tên hàng", dựng từ dữ liệu WMS, dùng để điền tạm tên hàng cho các dòng
-  // HĐ không tìm thấy phiếu WMS tương ứng (trạng thái "No Data WMS") vì file HĐ không có cột tên hàng.
-  const skuNameMap = new Map();
-
-  // LƯU Ý: HD phải xử lý SAU khi WMS xử lý xong hoàn toàn (không thể chạy song song 2 file)
-  // vì storeNameMap/skuNameMap cần đầy đủ dữ liệu WMS trước khi HD tra cứu.
-  try {
-    await processFile(
-      fileWms.path,
-      HEADER_MAP_WMS,
-      (raw) => finalizeWmsDoc(raw, storeNameMap, skuNameMap),
-      ["ma_ch", "sku", "so_phieu_wms"],
-      upsertWmsBatch,
-      stats.wms,
-    );
-    await processFile(
-      fileHd.path,
-      HEADER_MAP_HD,
-      (raw) => {
-        const doc = finalizeHdDoc(raw, storeNameMap);
-        if (doc._resolvedByName) stats.hd.resolvedByName += 1;
-        return doc;
-      },
-      ["ma_ch", "sku", "so_phieu_hd"],
-      (batch, s) => upsertHdBatch(batch, s, skuNameMap),
-      stats.hd,
-    );
-
-    fs.unlink(fileWms.path, () => {});
-    fs.unlink(fileHd.path, () => {});
-
-    const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
-
-    return res.status(200).json({
-      message: "Import & đối chiếu hoàn tất",
-      durationSeconds: durationSec,
-      wms: stats.wms,
-      hd: stats.hd,
-    });
-  } catch (err) {
-    fs.unlink(fileWms.path, () => {});
-    fs.unlink(fileHd.path, () => {});
-    console.error("Lỗi import/đối chiếu QuanLyHD:", err);
-    return res.status(500).json({
-      message: "Import thất bại",
-      error: err.message,
-      partialStats: stats,
-    });
   }
 };
 
