@@ -4,10 +4,23 @@ const dayjs = require("dayjs");
 const QuanLyHD = require("../../models/quanlyhd/quanlyhd");
 
 // ==== CẤU HÌNH CÓ THỂ CHỈNH ====
-// [PERF] Tăng 3000 -> 5000: ít round-trip bulkWrite hơn, giảm overhead network tới DB
-// [PERF-2] Sau khi bỏ bước findExistingWmsKeys (xem upsertHdBatch), có thể tăng thêm nữa
-// (thử 8000-10000) vì không còn tốn query $or nhiều điều kiện trước mỗi batch.
-const CHUNK_SIZE = 8000;
+// [PERF] Tăng 3000 -> 5000 -> 8000: ít round-trip bulkWrite hơn, giảm overhead network tới DB
+// [PERF-3] Giờ có thêm PIPELINE_CONCURRENCY (xem bên dưới) nên KHÔNG cần đẩy CHUNK_SIZE
+// lên quá cao nữa — tăng concurrency lợi hơn tăng chunk size vì tránh 1 bulkWrite quá
+// nặng chiếm hết băng thông. Đề xuất giữ 8000-10000 và tinh chỉnh PIPELINE_CONCURRENCY trước.
+const CHUNK_SIZE = 10000;
+
+// [PERF-3] MỚI: số batch được phép ghi DB SONG SONG trong khi vẫn tiếp tục đọc/parse
+// file Excel. Trước đây: đọc xong 1 batch -> await ghi DB xong -> mới đọc tiếp
+// (CPU parse và network I/O ghi DB chạy TUẦN TỰ, lãng phí thời gian chờ network).
+// Giờ: trong lúc chờ batch N ghi xong, vẫn tiếp tục đọc/parse batch N+1, N+2...
+// (chỉ dừng lại khi đã có đủ PIPELINE_CONCURRENCY batch đang ghi dở, tránh phình RAM
+// nếu tốc độ đọc file nhanh hơn tốc độ DB ghi).
+// 2-3 là mức an toàn: đủ để che khuất độ trễ network round-trip mà không làm DB quá tải
+// hay gây tranh chấp lock nếu nhiều batch cùng đụng vào các document gần nhau.
+// Có thể thử tăng lên 4-5 nếu DB còn dư tài nguyên (theo dõi CPU/IO của Mongo khi import).
+const PIPELINE_CONCURRENCY = 3;
+
 const MAX_HEADER_SCAN_ROWS = 20; // quét tối đa bấy nhiêu dòng đầu để tìm header thật (file HD có 5 dòng tiêu đề)
 const MAX_DETAIL_ENTRIES = 500; // giới hạn số dòng lỗi/bỏ qua trả về chi tiết, tránh response quá nặng
 
@@ -242,6 +255,13 @@ function finalizeWmsDoc(raw, storeNameMap, skuNameMap) {
  * Đọc 1 file Excel kiểu streaming, TỰ DÒ dòng header trong MAX_HEADER_SCAN_ROWS dòng đầu
  * (file Hóa Đơn có 5 dòng tiêu đề trước khi tới header thật), sau đó parse từng dòng
  * bằng finalizeRowFn, gom batch rồi gọi upsertBatchFn để ghi DB.
+ *
+ * [PERF-3] PIPELINE HOÁ: thay vì await xong batch N mới đọc tiếp batch N+1 (đọc file và
+ * ghi DB chạy TUẦN TỰ), giờ cho phép tối đa PIPELINE_CONCURRENCY batch ghi DB CÙNG LÚC
+ * trong khi vòng lặp đọc file vẫn tiếp tục parse các dòng kế tiếp. Việc đọc/parse Excel
+ * là CPU-bound và rất nhanh so với round-trip ghi DB (network-bound), nên overlap 2 việc
+ * này lại giúp giảm đáng kể tổng thời gian cho file ~1 triệu dòng, thay vì chỉ tăng
+ * CHUNK_SIZE (vốn chỉ giảm SỐ LẦN round-trip chứ không loại bỏ thời gian chờ round-trip).
  */
 async function processFile(
   filePath,
@@ -261,6 +281,23 @@ async function processFile(
   const minMatches = Math.min(3, Object.keys(headerMap).length);
   let headerIndexMap = null; // { [colIndex]: fieldName }
   let batch = [];
+
+  // [PERF-3] Set các promise ghi DB đang chạy dở. "flushBatch" gửi 1 batch đi ghi mà
+  // KHÔNG await ngay — chỉ await (chờ bớt) khi đã có đủ PIPELINE_CONCURRENCY batch
+  // đang bay cùng lúc, để không phình RAM nếu đọc file nhanh hơn ghi DB rất nhiều.
+  const inFlight = new Set();
+
+  async function flushBatch(batchToWrite) {
+    const p = Promise.resolve(upsertBatchFn(batchToWrite, stats)).finally(() =>
+      inFlight.delete(p),
+    );
+    inFlight.add(p);
+    if (inFlight.size >= PIPELINE_CONCURRENCY) {
+      // Chỉ cần chờ MỘT trong các batch đang bay xong (không phải chờ hết) để nhường chỗ
+      // cho batch tiếp theo — giữ cho luôn có PIPELINE_CONCURRENCY batch chạy song song.
+      await Promise.race(inFlight);
+    }
+  }
 
   for await (const worksheetReader of workbookReader) {
     for await (const row of worksheetReader) {
@@ -322,13 +359,19 @@ async function processFile(
       batch.push({ ...doc, _rowNumber: row.number });
 
       if (batch.length >= CHUNK_SIZE) {
-        await upsertBatchFn(batch, stats);
+        await flushBatch(batch);
         batch = [];
       }
     }
   }
 
-  await upsertBatchFn(batch, stats);
+  if (batch.length > 0) {
+    await flushBatch(batch);
+  }
+
+  // Đợi tất cả các batch còn đang bay (kể cả các batch được flush trước đó mà chưa
+  // kịp xong khi vòng lặp đọc file kết thúc) ghi xong hẳn trước khi coi là hoàn tất.
+  await Promise.all(inFlight);
 }
 
 /**
@@ -464,6 +507,11 @@ exports.importHd = async (req, res) => {
  * WMS đã được lưu tạm với trangThai "No Data WMS" (dùng so_phieu_hd làm so_phieu_wms trong
  * khóa), thì khi phiếu WMS ĐÚNG được import ở đây, nó sẽ tự động khớp và update vào ĐÚNG
  * document đó (không tạo document trùng), trangThai sẽ được tính lại bình thường ở dưới.
+ *
+ * [PERF-3] LƯU Ý QUAN TRỌNG khi chạy song song (PIPELINE_CONCURRENCY > 1): nhiều batch WMS
+ * ghi đồng thời là AN TOÀN vì mỗi batch chỉ đụng vào các document có filter riêng của nó
+ * (updateOne theo {ma_ch, sku, so_phieu_wms}) — 2 batch khác nhau trong CÙNG 1 file KHÔNG
+ * bao giờ trùng khóa (mỗi dòng file là 1 khóa duy nhất), nên không có tranh chấp ghi đè.
  */
 async function upsertWmsBatch(batch, stats) {
   if (batch.length === 0) return;
@@ -561,6 +609,12 @@ async function upsertWmsBatch(batch, stats) {
  *
  * bulkWrite result.upsertedIds cho biết CHÍNH XÁC index nào trong batch bị "No Data WMS"
  * (được tạo mới) -> dùng để build lại unmatchedDetails mà không cần query riêng.
+ *
+ * [PERF-3] Cũng an toàn khi chạy song song với các batch HĐ khác vì mỗi dòng file là
+ * 1 khóa {ma_ch, sku, so_phieu_hd} riêng biệt trong cùng 1 file. Điểm CẦN LƯU Ý: phần
+ * tra tên hàng cho missingSkus bên dưới có thể chạy trùng lặp giữa vài batch đang bay
+ * cùng lúc (2 batch cùng thấy 1 SKU "chưa biết tên" và cùng query DB) — chấp nhận được,
+ * chỉ tốn thêm vài query nhỏ, không ảnh hưởng tính đúng đắn của dữ liệu.
  */
 async function upsertHdBatch(batch, stats, skuNameMap) {
   if (batch.length === 0) return;
