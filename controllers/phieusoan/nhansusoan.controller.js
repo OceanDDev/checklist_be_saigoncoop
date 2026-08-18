@@ -974,6 +974,79 @@ const addGiaoKhach = async (req, res) => {
     });
   }
 };
+// controllers/phieusoan/nhanSuSoan.controller.js — thêm hàm mới
+
+/** GET public: chỉ trả về số liệu tổng hợp Dòng/Kiện theo nvSoan trong
+ * ngày hiện tại, dùng cho màn hình TV kiosk (QrDisplay) — không cần
+ * đăng nhập, không lộ dữ liệu chi tiết phiếu, chỉ trả về đã tổng hợp sẵn. */
+const getTopNangSuatCongKhai = async (req, res) => {
+  try {
+    const { ngay } = req.query; // YYYY-MM-DD, mặc định hôm nay theo giờ VN
+    const todayStr =
+      ngay ||
+      new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Ho_Chi_Minh" });
+
+    const start = startOfDayVN(todayStr);
+    const end = endOfDayVN(todayStr);
+
+    const items = await NhanSuSoan.find({
+      trangThai: "Hoàn thành",
+      tgNhanPhieu: { $gte: start, $lte: end },
+      tgHoanThanh: { $gte: start, $lte: end },
+    })
+      .select("nvSoan nvSoanChiTiet kien dong")
+      .lean();
+
+    const statMap = new Map();
+    items.forEach((item) => {
+      const kien = item.kien || 0;
+      const dong = item.dong || 0;
+      const list =
+        item.nvSoanChiTiet && item.nvSoanChiTiet.length
+          ? item.nvSoanChiTiet
+          : item.nvSoan || [];
+      const codes = Array.from(
+        new Set(
+          list
+            .map((x) =>
+              typeof x === "object" ? x.ma_nhan_vien : x,
+            )
+            .map((c) => (c || "").toString().trim().toUpperCase())
+            .filter(Boolean),
+        ),
+      );
+      codes.forEach((code) => {
+        const entry = statMap.get(code) || { kien: 0, dong: 0 };
+        entry.kien += kien;
+        entry.dong += dong;
+        statMap.set(code, entry);
+      });
+    });
+
+    // Kèm tên/chức vụ luôn để frontend kiosk không cần gọi thêm API nhân viên
+    const codes = Array.from(statMap.keys());
+    const nhanViens = codes.length
+      ? await NhanVien.find(
+          { ma_nhan_vien: { $in: codes } },
+          { ma_nhan_vien: 1, ten_nhan_vien: 1, chuc_vu: 1, _id: 0 },
+        ).lean()
+      : [];
+    const nvMap = new Map(nhanViens.map((nv) => [nv.ma_nhan_vien, nv]));
+
+    const data = Array.from(statMap.entries()).map(([code, s]) => ({
+      code,
+      kien: s.kien,
+      dong: s.dong,
+      ten: nvMap.get(code)?.ten_nhan_vien || code,
+      chucVu: nvMap.get(code)?.chuc_vu || "",
+    }));
+
+    res.status(200).json({ data, ngay: todayStr });
+  } catch (error) {
+    res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
+
 module.exports = {
   createNhanSuSoan,
   importManyNhanSuSoan,
@@ -989,4 +1062,6 @@ module.exports = {
   locVaLoaiTrungKhiImport,
   ganThongTinTuDataCHTheoMaCh, // 👈 thêm dòng này
   addGiaoKhach,
+    getTopNangSuatCongKhai,
+
 };

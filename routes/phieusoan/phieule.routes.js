@@ -18,7 +18,8 @@ const {
   deleteManyNhanSuSoan,
   deleteAllNhanSuSoan,
   importUpdateNhanSuSoan  ,
-  addGiaoKhach 
+  addGiaoKhach ,
+  getTopNangSuatCongKhai
 } = require("../../controllers/phieusoan/nhansusoan.controller"); 
 
 // ===== MULTER CONFIG =====
@@ -75,6 +76,8 @@ router.put("/dataCH/:id", verifyToken, dataCHController.updateDataCH);
 router.delete("/dataCH/:id", verifyToken, dataCHController.deleteDataCH);
 
 // ===== NHÂN SỰ SOẠN ROUTES =====
+
+router.get("/nhansusoan/top-nang-suat-cong-khai", getTopNangSuatCongKhai);
 router.delete("/nhansusoan/delete-all", verifyToken, deleteAllNhanSuSoan);
 router.post("/nhansusoan/import-update",verifyToken, importUpdateNhanSuSoan)
 router.post("/nhansusoan/add-giao-khach",verifyToken, addGiaoKhach)

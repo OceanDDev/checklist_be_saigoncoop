@@ -7,6 +7,9 @@ const { verifyToken } = require("../../middlewares/authMiddleware"); // chỉnh 
 
 // ── BookXe (admin - cần login) ───────────────────────────────────────────────
 router.get("/bookxe", verifyToken, bookXeController.getAllBookXe);
+// route tĩnh /suggest PHẢI đứng trước /:id, không thì Express sẽ hiểu
+// "suggest" chính là :id và gọi nhầm qua getBookXeById.
+router.get("/bookxe/suggest", verifyToken, bookXeController.suggestBookXe);
 router.get("/bookxe/:id", verifyToken, bookXeController.getBookXeById);
 router.post("/bookxe", verifyToken, bookXeController.createBookXe);
 router.put("/bookxe/:id", verifyToken, bookXeController.updateBookXe);
@@ -54,5 +57,5 @@ router.delete(
   verifyToken,
   historyBookXeController.deleteManyHistoryBookXe,
 );
-
+// routes/nhansusoan.route.js (hoặc file router tổng hợp)
 module.exports = router;

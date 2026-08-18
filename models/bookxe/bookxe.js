@@ -12,6 +12,11 @@ const bookXeSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+     ngay_di_hang: {
+      type: Date,
+      required: true,
+      trim: true,
+    },
     quan: {
       type: String,
       trim: true,
@@ -50,10 +55,13 @@ const bookXeSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+ ghi_chu: {
+      type: String,
+    },
 
     trangThai: {
       type: String,
-      enum: ["Chưa Book", "Chờ xe","Có kiện rớt", "Hoàn thành"],
+      enum: ["Chưa Book", "Chờ xe", "Có kiện rớt", "Hoàn thành"],
       default: "Chưa Book",
     },
     thoi_gian_tao: {
@@ -61,6 +69,15 @@ const bookXeSchema = new mongoose.Schema(
     },
     thoi_gian_hoan_thanh: {
       type: Date,
+    },
+    // thêm vào bookxe schema (cạnh các field kien, kien_rot, quan,...)
+    co_giao_khach: {
+      type: Boolean,
+      default: false,
+    },
+    ngay_giao_khach: {
+      type: String, // "YYYY-MM-DD" — ngày phát sinh giao khách, lấy từ ngày book
+      trim: true,
     },
   },
   { timestamps: true },
