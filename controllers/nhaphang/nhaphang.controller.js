@@ -1,19 +1,34 @@
 const NhapHang = require("../../models/nhaphang/nhaphang");
 
+// ─────────────────────────────────────────────
+// CREATE (tạo 1 bản ghi)
+// ─────────────────────────────────────────────
 exports.create = async (req, res) => {
   try {
-    const { sku, name, kien, kho, tong_sl, trang_thai, ngay_nhap_kho } =
-      req.body;
+    const {
+      sku,
+      name,
+      vi_tri,
+      kien,
+      kho,
+      tong_sl,
+      trang_thai,
+      loai_hinh,
+      ngay_nhap_kho,
+      ngay_let,
+    } = req.body;
 
     const newItem = new NhapHang({
       sku,
       name,
+      vi_tri,
       kien,
       kho,
-      vi_tri,
       tong_sl,
       trang_thai,
+      loai_hinh,
       ngay_nhap_kho,
+      ngay_let,
       ngay_import: new Date(),
     });
 
@@ -26,6 +41,7 @@ exports.create = async (req, res) => {
       .json({ message: "Lỗi server khi tạo", error: error.message });
   }
 };
+
 // ─────────────────────────────────────────────
 // GET ALL (phân trang + search theo từng field)
 // ─────────────────────────────────────────────
@@ -41,7 +57,9 @@ exports.getAll = async (req, res) => {
       kho,
       tong_sl,
       trang_thai,
+      loai_hinh,
       ngay_nhap_kho,
+      ngay_let,
       ngay_import,
     } = req.query;
 
@@ -55,6 +73,7 @@ exports.getAll = async (req, res) => {
     textFilter("name", name);
     textFilter("vi_tri", vi_tri);
     textFilter("trang_thai", trang_thai);
+    textFilter("loai_hinh", loai_hinh);
 
     // Số -> match chính xác (nếu value không phải số hợp lệ thì bỏ qua)
     const numberFilter = (field, value) => {
@@ -66,7 +85,7 @@ exports.getAll = async (req, res) => {
     numberFilter("kho", kho);
     numberFilter("tong_sl", tong_sl);
 
-    // Ngày -> nhận vào dạng "dd/mm/yyyy" hoặc "yyyy-mm-dd", match nguyên ngày đó (00:00 -> 23:59 UTC)
+    // Ngày -> nhận "dd/mm/yyyy" hoặc ISO, match nguyên ngày đó (00:00 -> 23:59 UTC)
     const dateFilter = (field, value) => {
       if (!value) return;
       let date;
@@ -101,6 +120,7 @@ exports.getAll = async (req, res) => {
       query[field] = { $gte: start, $lte: end };
     };
     dateFilter("ngay_nhap_kho", ngay_nhap_kho);
+    dateFilter("ngay_let", ngay_let);
     dateFilter("ngay_import", ngay_import);
 
     const skip = (Number(page) - 1) * Number(limit);
@@ -126,6 +146,7 @@ exports.getAll = async (req, res) => {
       .json({ message: "Lỗi server khi lấy danh sách", error: error.message });
   }
 };
+
 // ─────────────────────────────────────────────
 // GET ONE (theo id)
 // ─────────────────────────────────────────────
@@ -199,11 +220,11 @@ exports.remove = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────
-// IMPORT MANY (tạo mới hàng loạt, dùng cho import Excel)
+// IMPORT MANY (tạo mới hàng loạt, dùng cho import Excel — cả Nhập & Let)
 // ─────────────────────────────────────────────
 exports.importMany = async (req, res) => {
   try {
-    const { items } = req.body; // items: [{ sku, name, kien, tong_sl, trang_thai, ngay_nhap_kho }, ...]
+    const { items } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return res
@@ -218,11 +239,17 @@ exports.importMany = async (req, res) => {
       vi_tri: item.vi_tri,
       kien: Number(item.kien),
       kho: Number(item.kho),
-      tong_sl: Number(item.tong_sl),
+      // "Let" không có cột Tổng SL -> để undefined, schema default sẽ tự set 0
+      tong_sl:
+        item.tong_sl !== undefined && item.tong_sl !== ""
+          ? Number(item.tong_sl)
+          : undefined,
       trang_thai: item.trang_thai || "Chưa xử lý",
+      loai_hinh: item.loai_hinh || "Nhập",
       ngay_nhap_kho: item.ngay_nhap_kho
         ? new Date(item.ngay_nhap_kho)
         : undefined,
+      ngay_let: item.ngay_let ? new Date(item.ngay_let) : undefined,
       ngay_import: now,
     }));
 
