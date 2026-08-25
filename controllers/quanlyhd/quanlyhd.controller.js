@@ -274,6 +274,7 @@ async function processFile(
   const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
     entries: "emit",
     sharedStrings: "cache",
+    
     styles: "cache",
     worksheets: "emit",
   });

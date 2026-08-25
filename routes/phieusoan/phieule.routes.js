@@ -17,10 +17,17 @@ const {
   deleteNhanSuSoan,
   deleteManyNhanSuSoan,
   deleteAllNhanSuSoan,
-  importUpdateNhanSuSoan  ,
-  addGiaoKhach ,
-  getTopNangSuatCongKhai
-} = require("../../controllers/phieusoan/nhansusoan.controller"); 
+  importUpdateNhanSuSoan,
+  addGiaoKhach,
+  getTopNangSuatCongKhai,
+} = require("../../controllers/phieusoan/nhansusoan.controller");
+
+const {
+  batDauNgungNangSuat,
+  ketThucNgungNangSuat,
+  getDangNgungNangSuat,
+  getAllNgungNangSuat,
+} = require("../../controllers/phieusoan/ngungnangsuat.controller");
 
 // ===== MULTER CONFIG =====
 const upload = multer({
@@ -29,7 +36,11 @@ const upload = multer({
       cb(null, path.join(__dirname, "../../uploads"));
     },
     filename: (req, file, cb) => {
-      const uniqueName = Date.now() + "-" + Math.random().toString(36).slice(2) + path.extname(file.originalname);
+      const uniqueName =
+        Date.now() +
+        "-" +
+        Math.random().toString(36).slice(2) +
+        path.extname(file.originalname);
       cb(null, uniqueName);
     },
   }),
@@ -42,32 +53,117 @@ const upload = multer({
 });
 
 // ===== PHIẾU LẺ ROUTES =====
-router.post("/phieule/import-soda", verifyToken, phieuLeController.importSDPhieuLe);
-router.get("/phieule/migrate-loai-phieu", verifyToken, phieuLeController.migrateLoaiPhieu);
-router.post("/phieule/import-8101", verifyToken, phieuLeController.import8101PhieuLe);
-router.post("/phieule/import-soda-txt", verifyToken, upload.single("file"), phieuLeController.importSodaTxtPhieuLe);
-router.post("/phieule/import-soda-txt-multiple", verifyToken, upload.array("files", 50), phieuLeController.importSodaTxtPhieuLeMultiple);
+router.post(
+  "/phieule/import-soda",
+  verifyToken,
+  phieuLeController.importSDPhieuLe,
+);
+router.get(
+  "/phieule/migrate-loai-phieu",
+  verifyToken,
+  phieuLeController.migrateLoaiPhieu,
+);
+router.post(
+  "/phieule/import-8101",
+  verifyToken,
+  phieuLeController.import8101PhieuLe,
+);
+router.post(
+  "/phieule/import-soda-txt",
+  verifyToken,
+  upload.single("file"),
+  phieuLeController.importSodaTxtPhieuLe,
+);
+router.post(
+  "/phieule/import-soda-txt-multiple",
+  verifyToken,
+  upload.array("files", 50),
+  phieuLeController.importSodaTxtPhieuLeMultiple,
+);
 router.get("/phieule", verifyToken, phieuLeController.getAllPhieuLe);
-router.get("/phieule/statistics", verifyToken, phieuLeController.getPhieuLeStatistics);
-router.get("/phieule/document/:so_document", verifyToken, phieuLeController.getPhieuLeBySoDocument);
+router.get(
+  "/phieule/statistics",
+  verifyToken,
+  phieuLeController.getPhieuLeStatistics,
+);
+router.get(
+  "/phieule/document/:so_document",
+  verifyToken,
+  phieuLeController.getPhieuLeBySoDocument,
+);
 router.get("/phieule/:id", verifyToken, phieuLeController.getPhieuLeById);
-router.post("/phieule", apiKeyAuth, verifyToken, phieuLeController.createPhieuLe);
-router.post("/phieule/import", verifyToken, phieuLeController.importManyPhieuLe);
-router.post("/phieule/import-txt", verifyToken, upload.single("file"), phieuLeController.importTxtPhieuLe);
-router.post("/phieule/import-txt-multiple", verifyToken, upload.array("files", 50), phieuLeController.importTxtPhieuLeMultiple);
-router.post("/phieule/clear-all", verifyToken, phieuLeController.clearAllPhieuLe);
-router.put("/phieule/update-by-sdtf", verifyToken, phieuLeController.updateTrangThaiBySDTF);
-router.patch("/phieule/:id/chi-tiet/bulk-update", verifyToken, phieuLeController.updateMultipleChiTiet);
-router.put("/phieule/:id/chitiet", verifyToken, phieuLeController.updateChiTietPhieuLe);
-router.put("/phieule/update-many", verifyToken, phieuLeController.updateManyPhieuLe);
+router.post(
+  "/phieule",
+  apiKeyAuth,
+  verifyToken,
+  phieuLeController.createPhieuLe,
+);
+router.post(
+  "/phieule/import",
+  verifyToken,
+  phieuLeController.importManyPhieuLe,
+);
+router.post(
+  "/phieule/import-txt",
+  verifyToken,
+  upload.single("file"),
+  phieuLeController.importTxtPhieuLe,
+);
+router.post(
+  "/phieule/import-txt-multiple",
+  verifyToken,
+  upload.array("files", 50),
+  phieuLeController.importTxtPhieuLeMultiple,
+);
+router.post(
+  "/phieule/clear-all",
+  verifyToken,
+  phieuLeController.clearAllPhieuLe,
+);
+router.put(
+  "/phieule/update-by-sdtf",
+  verifyToken,
+  phieuLeController.updateTrangThaiBySDTF,
+);
+router.patch(
+  "/phieule/:id/chi-tiet/bulk-update",
+  verifyToken,
+  phieuLeController.updateMultipleChiTiet,
+);
+router.put(
+  "/phieule/:id/chitiet",
+  verifyToken,
+  phieuLeController.updateChiTietPhieuLe,
+);
+router.put(
+  "/phieule/update-many",
+  verifyToken,
+  phieuLeController.updateManyPhieuLe,
+);
 router.put("/phieule/:id", verifyToken, phieuLeController.updatePhieuLe);
-router.put("/phieule/:id/status", verifyToken, phieuLeController.updatePhieuLeStatus);
-router.delete("/phieule/many", verifyToken, phieuLeController.deleteManyPhieuLe);
-router.delete("/phieule/by-filter", verifyToken, phieuLeController.deleteManyPhieuLeByFilter);
+router.put(
+  "/phieule/:id/status",
+  verifyToken,
+  phieuLeController.updatePhieuLeStatus,
+);
+router.delete(
+  "/phieule/many",
+  verifyToken,
+  phieuLeController.deleteManyPhieuLe,
+);
+router.delete(
+  "/phieule/by-filter",
+  verifyToken,
+  phieuLeController.deleteManyPhieuLeByFilter,
+);
 router.delete("/phieule/:id", verifyToken, phieuLeController.deletePhieuLe);
 
 // ===== DATA CỬA HÀNG ROUTES =====
-router.delete("/dataCH/delete-all", verifyToken, dataCHController.deleteAllDataCH);
+router.delete(
+  "/dataCH/delete-all",
+  verifyToken,
+  dataCHController.deleteAllDataCH,
+);
 router.get("/dataCH", verifyToken, dataCHController.getAllDataCH);
 router.get("/dataCH/:id", verifyToken, dataCHController.getDataCHById);
 router.post("/dataCH", verifyToken, dataCHController.addDataCH);
@@ -79,8 +175,8 @@ router.delete("/dataCH/:id", verifyToken, dataCHController.deleteDataCH);
 
 router.get("/nhansusoan/top-nang-suat-cong-khai", getTopNangSuatCongKhai);
 router.delete("/nhansusoan/delete-all", verifyToken, deleteAllNhanSuSoan);
-router.post("/nhansusoan/import-update",verifyToken, importUpdateNhanSuSoan)
-router.post("/nhansusoan/add-giao-khach",verifyToken, addGiaoKhach)
+router.post("/nhansusoan/import-update", verifyToken, importUpdateNhanSuSoan);
+router.post("/nhansusoan/add-giao-khach", verifyToken, addGiaoKhach);
 router.get("/nhansusoan", verifyToken, getAllNhanSuSoan);
 router.get("/nhansusoan/:id", verifyToken, getNhanSuSoanById);
 router.post("/nhansusoan", verifyToken, createNhanSuSoan);
@@ -90,4 +186,8 @@ router.put("/nhansusoan/:id", verifyToken, updateNhanSuSoan);
 router.delete("/nhansusoan/many", verifyToken, deleteManyNhanSuSoan);
 router.delete("/nhansusoan/:id", verifyToken, deleteNhanSuSoan);
 
+router.get("/ngungnangsuat/dang-ngung", verifyToken, getDangNgungNangSuat);
+router.get("/ngungnangsuat", verifyToken, getAllNgungNangSuat);
+router.post("/ngungnangsuat/bat-dau", verifyToken, batDauNgungNangSuat);
+router.post("/ngungnangsuat/ket-thuc", verifyToken, ketThucNgungNangSuat);
 module.exports = router;
