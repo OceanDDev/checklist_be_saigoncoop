@@ -12,10 +12,16 @@ exports.create = async (req, res) => {
       kien,
       kho,
       tong_sl,
+      lpn,
       trang_thai,
       loai_hinh,
+      nhan_vien_nhap,
+      nhan_vien_put,
+      nhan_vien_let,
       ngay_nhap_kho,
-      ngay_let,
+      ngay_nhan_let,
+      ngay_gio_tao_let,
+      ngay_gio_hoan_thanh,
     } = req.body;
 
     const newItem = new NhapHang({
@@ -25,10 +31,16 @@ exports.create = async (req, res) => {
       kien,
       kho,
       tong_sl,
+      lpn,
       trang_thai,
       loai_hinh,
+      nhan_vien_nhap,
+      nhan_vien_put,
+      nhan_vien_let,
       ngay_nhap_kho,
-      ngay_let,
+      ngay_nhan_let,
+      ngay_gio_tao_let,
+      ngay_gio_hoan_thanh,
       ngay_import: new Date(),
     });
 
@@ -56,11 +68,25 @@ exports.getAll = async (req, res) => {
       kien,
       kho,
       tong_sl,
+      lpn,
       trang_thai,
       loai_hinh,
+      nhan_vien_nhap,
+      nhan_vien_put,
+      nhan_vien_let,
       ngay_nhap_kho,
-      ngay_let,
+      ngay_nhan_let,
+      ngay_nhan_let_from,
+      ngay_nhan_let_to,
+      ngay_gio_tao_let,
+      ngay_gio_tao_let_from,
+      ngay_gio_tao_let_to,
+      ngay_gio_hoan_thanh,
+      ngay_gio_hoan_thanh_from,
+      ngay_gio_hoan_thanh_to,
       ngay_import,
+      ngay_import_from,
+      ngay_import_to,
     } = req.query;
 
     const query = {};
@@ -72,8 +98,12 @@ exports.getAll = async (req, res) => {
     textFilter("sku", sku);
     textFilter("name", name);
     textFilter("vi_tri", vi_tri);
+    textFilter("lpn", lpn);
     textFilter("trang_thai", trang_thai);
     textFilter("loai_hinh", loai_hinh);
+    textFilter("nhan_vien_nhap", nhan_vien_nhap);
+    textFilter("nhan_vien_put", nhan_vien_put);
+    textFilter("nhan_vien_let", nhan_vien_let);
 
     // Số -> match chính xác (nếu value không phải số hợp lệ thì bỏ qua)
     const numberFilter = (field, value) => {
@@ -85,9 +115,9 @@ exports.getAll = async (req, res) => {
     numberFilter("kho", kho);
     numberFilter("tong_sl", tong_sl);
 
-    // Ngày -> nhận "dd/mm/yyyy" hoặc ISO, match nguyên ngày đó (00:00 -> 23:59 UTC)
-    const dateFilter = (field, value) => {
-      if (!value) return;
+    // Parse "dd/mm/yyyy" hoặc ISO -> Date (chỉ lấy phần ngày, bỏ giờ)
+    const parseDateOnly = (value) => {
+      if (!value) return null;
       let date;
       if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
         const [d, m, y] = value.split("/");
@@ -95,7 +125,13 @@ exports.getAll = async (req, res) => {
       } else {
         date = new Date(value);
       }
-      if (isNaN(date.getTime())) return;
+      return isNaN(date.getTime()) ? null : date;
+    };
+
+    // Ngày -> match nguyên ngày đó (00:00 -> 23:59 UTC), dùng cho filter 1 ngày
+    const dateFilter = (field, value) => {
+      const date = parseDateOnly(value);
+      if (!date) return;
       const start = new Date(
         Date.UTC(
           date.getUTCFullYear(),
@@ -119,9 +155,75 @@ exports.getAll = async (req, res) => {
       );
       query[field] = { $gte: start, $lte: end };
     };
+
+    // Ngày -> lọc theo khoảng (Từ ngày - Đến ngày), chỉ quan tâm ngày,
+    // bỏ qua giờ (Từ ngày lấy từ 00:00 UTC, Đến ngày lấy tới 23:59:59 UTC).
+    // 1 trong 2 mốc có thể bỏ trống (chỉ lọc 1 chiều).
+    const dateRangeFilter = (field, fromValue, toValue) => {
+      const range = {};
+      const fromDate = parseDateOnly(fromValue);
+      if (fromDate) {
+        range.$gte = new Date(
+          Date.UTC(
+            fromDate.getUTCFullYear(),
+            fromDate.getUTCMonth(),
+            fromDate.getUTCDate(),
+            0,
+            0,
+            0,
+          ),
+        );
+      }
+      const toDate = parseDateOnly(toValue);
+      if (toDate) {
+        range.$lte = new Date(
+          Date.UTC(
+            toDate.getUTCFullYear(),
+            toDate.getUTCMonth(),
+            toDate.getUTCDate(),
+            23,
+            59,
+            59,
+            999,
+          ),
+        );
+      }
+      if (Object.keys(range).length > 0) query[field] = range;
+    };
+
     dateFilter("ngay_nhap_kho", ngay_nhap_kho);
-    dateFilter("ngay_let", ngay_let);
-    dateFilter("ngay_import", ngay_import);
+
+    // 4 cột ngày giờ dùng filter khoảng (Từ ngày/Đến ngày). Nếu FE lỡ gửi
+    // giá trị đơn (không có _from/_to) thì vẫn fallback về match 1 ngày
+    // như cũ để tương thích ngược.
+    if (ngay_nhan_let_from || ngay_nhan_let_to) {
+      dateRangeFilter("ngay_nhan_let", ngay_nhan_let_from, ngay_nhan_let_to);
+    } else {
+      dateFilter("ngay_nhan_let", ngay_nhan_let);
+    }
+    if (ngay_gio_tao_let_from || ngay_gio_tao_let_to) {
+      dateRangeFilter(
+        "ngay_gio_tao_let",
+        ngay_gio_tao_let_from,
+        ngay_gio_tao_let_to,
+      );
+    } else {
+      dateFilter("ngay_gio_tao_let", ngay_gio_tao_let);
+    }
+    if (ngay_gio_hoan_thanh_from || ngay_gio_hoan_thanh_to) {
+      dateRangeFilter(
+        "ngay_gio_hoan_thanh",
+        ngay_gio_hoan_thanh_from,
+        ngay_gio_hoan_thanh_to,
+      );
+    } else {
+      dateFilter("ngay_gio_hoan_thanh", ngay_gio_hoan_thanh);
+    }
+    if (ngay_import_from || ngay_import_to) {
+      dateRangeFilter("ngay_import", ngay_import_from, ngay_import_to);
+    } else {
+      dateFilter("ngay_import", ngay_import);
+    }
 
     const skip = (Number(page) - 1) * Number(limit);
 
@@ -221,6 +323,9 @@ exports.remove = async (req, res) => {
 
 // ─────────────────────────────────────────────
 // IMPORT MANY (tạo mới hàng loạt, dùng cho import Excel — cả Nhập & Let)
+// LPN trùng -> UPSERT (cập nhật lại bản ghi cũ theo dữ liệu file mới)
+// thay vì tạo bản ghi lặp. Match theo (lpn + loai_hinh) để tránh đè nhầm
+// sang bản ghi "Let" trót trùng LPN với bản ghi "Nhập".
 // ─────────────────────────────────────────────
 exports.importMany = async (req, res) => {
   try {
@@ -239,38 +344,94 @@ exports.importMany = async (req, res) => {
       vi_tri: item.vi_tri,
       kien: Number(item.kien),
       kho: Number(item.kho),
-      // "Let" không có cột Tổng SL -> để undefined, schema default sẽ tự set 0
       tong_sl:
         item.tong_sl !== undefined && item.tong_sl !== ""
           ? Number(item.tong_sl)
           : undefined,
+      lpn: item.lpn || undefined,
       trang_thai: item.trang_thai || "Chưa xử lý",
       loai_hinh: item.loai_hinh || "Nhập",
+      nhan_vien_nhap: item.nhan_vien_nhap || undefined,
+      nhan_vien_put: item.nhan_vien_put || undefined,
+      nhan_vien_let: item.nhan_vien_let || undefined,
       ngay_nhap_kho: item.ngay_nhap_kho
         ? new Date(item.ngay_nhap_kho)
         : undefined,
-      ngay_let: item.ngay_let ? new Date(item.ngay_let) : undefined,
+      ngay_nhan_let: item.ngay_nhan_let
+        ? new Date(item.ngay_nhan_let)
+        : undefined,
+      ngay_gio_tao_let: item.ngay_gio_tao_let
+        ? new Date(item.ngay_gio_tao_let)
+        : undefined,
+      ngay_gio_hoan_thanh: item.ngay_gio_hoan_thanh
+        ? new Date(item.ngay_gio_hoan_thanh)
+        : undefined,
       ngay_import: now,
     }));
 
-    const result = await NhapHang.insertMany(docs, { ordered: false });
+    // "Let" -> 1 LPN có thể được châm hàng nhiều lần -> KHÔNG upsert,
+    // luôn insert như bản ghi mới (kể cả trùng LPN với bản ghi Let khác).
+    // "Nhập"/"Put" hoặc không có LPN -> giữ nguyên logic cũ.
+    const letItems = docs.filter((d) => d.loai_hinh === "Let");
+    const nonLetWithLpn = docs.filter((d) => d.loai_hinh !== "Let" && d.lpn);
+    const nonLetWithoutLpn = docs.filter(
+      (d) => d.loai_hinh !== "Let" && !d.lpn,
+    );
+    const toInsertDirectly = [...letItems, ...nonLetWithoutLpn];
+
+    let insertedCount = 0;
+    let upsertedCount = 0;
+    let modifiedCount = 0;
+    const writeErrors = [];
+
+    // Let (mọi LPN) + không có LPN -> insert thẳng, không match/upsert
+    if (toInsertDirectly.length > 0) {
+      try {
+        const inserted = await NhapHang.insertMany(toInsertDirectly, {
+          ordered: false,
+        });
+        insertedCount += inserted.length;
+      } catch (err) {
+        if (err.writeErrors) {
+          insertedCount += err.result?.result?.nInserted || 0;
+          writeErrors.push(
+            ...err.writeErrors.map((e) => ({
+              index: e.index,
+              message: e.errmsg,
+            })),
+          );
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    // Nhập/Put có LPN -> upsert theo (lpn + loai_hinh): LPN mới -> tạo mới,
+    // LPN đã tồn tại -> ghi đè toàn bộ field theo dữ liệu file mới
+    if (nonLetWithLpn.length > 0) {
+      const bulkOps = nonLetWithLpn.map((doc) => ({
+        updateOne: {
+          filter: { lpn: doc.lpn, loai_hinh: doc.loai_hinh },
+          update: { $set: doc },
+          upsert: true,
+        },
+      }));
+
+      const bulkResult = await NhapHang.bulkWrite(bulkOps, {
+        ordered: false,
+      });
+      upsertedCount += bulkResult.upsertedCount || 0;
+      modifiedCount += bulkResult.modifiedCount || 0;
+    }
 
     return res.status(201).json({
-      message: `Import thành công ${result.length}/${items.length} dòng`,
-      inserted: result.length,
-      data: result,
+      message: `Import xong: ${insertedCount} dòng mới (Let/không LPN), ${upsertedCount} LPN mới, ${modifiedCount} LPN đã cập nhật lại`,
+      insertedCount,
+      upsertedCount,
+      modifiedCount,
+      writeErrors: writeErrors.length ? writeErrors : undefined,
     });
   } catch (error) {
-    if (error.writeErrors) {
-      return res.status(207).json({
-        message: "Import một phần thành công, có lỗi ở một số dòng",
-        insertedCount: error.result?.result?.nInserted || 0,
-        errors: error.writeErrors.map((e) => ({
-          index: e.index,
-          message: e.errmsg,
-        })),
-      });
-    }
     console.error("Lỗi importMany NhapHang:", error);
     return res
       .status(500)
