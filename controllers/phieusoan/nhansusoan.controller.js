@@ -745,7 +745,6 @@ const importUpdateNhanSuSoan = async (req, res) => {
         modifiedCount: 0,
         skipped,
       });
-      
     }
 
     // Tự điền lại Nơi Xuất Đến/Lịch Đi Hàng theo Mã NXĐ (đồng bộ với các
@@ -1009,9 +1008,7 @@ const getTopNangSuatCongKhai = async (req, res) => {
       const codes = Array.from(
         new Set(
           list
-            .map((x) =>
-              typeof x === "object" ? x.ma_nhan_vien : x,
-            )
+            .map((x) => (typeof x === "object" ? x.ma_nhan_vien : x))
             .map((c) => (c || "").toString().trim().toUpperCase())
             .filter(Boolean),
         ),
@@ -1048,6 +1045,115 @@ const getTopNangSuatCongKhai = async (req, res) => {
   }
 };
 
+// ─── Cập nhật hàng loạt Kiện Dự Kiến theo soDonHang ───────────────────────────
+// body: { data: [{ soDonHang, kien_du_kien }, ...] }
+const updateManyKienDuKien = async (req, res) => {
+  try {
+    const { data } = req.body;
+
+    if (!Array.isArray(data) || data.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "Dữ liệu phải là mảng và không được rỗng" });
+    }
+
+    const skipped = []; // { soDonHang, reason }
+    const validData = [];
+
+    // 1) Validate: cần soDonHang và kien_du_kien là số hợp lệ (>= 0)
+    data.forEach((item) => {
+      const code = (item.soDonHang || "").toString().trim();
+      if (!code) {
+        skipped.push({ soDonHang: "(trống)", reason: "Thiếu số đơn hàng" });
+        return;
+      }
+      const kdk = Number(item.kien_du_kien);
+      if (Number.isNaN(kdk) || kdk < 0) {
+        skipped.push({
+          soDonHang: code,
+          reason: "Kiện dự kiến không hợp lệ (phải là số >= 0)",
+        });
+        return;
+      }
+      validData.push({ soDonHang: code, kien_du_kien: kdk });
+    });
+
+    // 2) Loại trùng NGAY TRONG FILE (chỉ giữ dòng cuối cùng — ưu tiên giá trị mới nhất)
+    const seenInFile = new Map();
+    validData.forEach((item) => {
+      seenInFile.set(item.soDonHang.toUpperCase(), item);
+    });
+    const dedupedData = Array.from(seenInFile.values());
+
+    if (dedupedData.length === 0) {
+      return res.status(200).json({
+        message: `Không có dòng nào hợp lệ để cập nhật. Đã bỏ qua ${skipped.length} dòng.`,
+        matchedCount: 0,
+        modifiedCount: 0,
+        skipped,
+      });
+    }
+
+    // 3) Kiểm tra tồn tại trong hệ thống theo soDonHang
+    const codesToCheck = dedupedData.map((it) => it.soDonHang);
+    const existingDocs = await NhanSuSoan.find({
+      soDonHang: { $in: codesToCheck },
+    })
+      .collation({ locale: "vi", strength: 2 })
+      .select("soDonHang")
+      .lean();
+
+    const existingKeySet = new Set(
+      existingDocs.map((d) => d.soDonHang.toUpperCase()),
+    );
+
+    const toUpdate = [];
+    dedupedData.forEach((item) => {
+      if (!existingKeySet.has(item.soDonHang.toUpperCase())) {
+        skipped.push({
+          soDonHang: item.soDonHang,
+          reason: "Không tìm thấy số đơn hàng trong hệ thống",
+        });
+      } else {
+        toUpdate.push(item);
+      }
+    });
+
+    if (toUpdate.length === 0) {
+      return res.status(200).json({
+        message: `Không có dòng nào để cập nhật. Đã bỏ qua ${skipped.length} dòng.`,
+        matchedCount: 0,
+        modifiedCount: 0,
+        skipped,
+      });
+    }
+
+    // 4) BulkWrite cập nhật kien_du_kien theo soDonHang
+    const bulkOps = toUpdate.map((item) => ({
+      updateOne: {
+        filter: { soDonHang: item.soDonHang },
+        collation: { locale: "vi", strength: 2 },
+        update: { $set: { kien_du_kien: item.kien_du_kien } },
+      },
+    }));
+
+    const result = await NhanSuSoan.bulkWrite(bulkOps, { ordered: false });
+
+    res.status(200).json({
+      message: `Đã cập nhật Kiện Dự Kiến cho ${result.modifiedCount} phiếu${
+        skipped.length > 0 ? `, bỏ qua ${skipped.length} dòng` : ""
+      }`,
+      matchedCount: result.matchedCount,
+      modifiedCount: result.modifiedCount,
+      skipped,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Lỗi khi cập nhật hàng loạt Kiện Dự Kiến",
+      error: error.message,
+    });
+  }
+};
 module.exports = {
   createNhanSuSoan,
   importManyNhanSuSoan,
@@ -1063,6 +1169,6 @@ module.exports = {
   locVaLoaiTrungKhiImport,
   ganThongTinTuDataCHTheoMaCh, // 👈 thêm dòng này
   addGiaoKhach,
-    getTopNangSuatCongKhai,
-
+  getTopNangSuatCongKhai,
+  updateManyKienDuKien,
 };
