@@ -79,6 +79,8 @@ const bookXeSchema = new mongoose.Schema(
       type: String, // "YYYY-MM-DD" — ngày phát sinh giao khách, lấy từ ngày book
       trim: true,
     },
+    nhan_su_soan_ids: [{ type: mongoose.Schema.Types.ObjectId, ref: "NhanSuSoan" }],
+rot_kien_ids: [{ type: mongoose.Schema.Types.ObjectId, ref: "RotKien" }],
   },
   { timestamps: true },
 );
