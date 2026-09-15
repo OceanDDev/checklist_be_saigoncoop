@@ -500,15 +500,18 @@ const suggestBookXe = async (req, res) => {
     const dataCHDocs = maChNormalizedList.length
       ? await DataCH.find(
           { mach: { $in: maChNormalizedList } },
-          { mach: 1, quan: 1, _id: 0 },
+          { mach: 1, quan: 1, lich_di_hang_bookxe: 1, _id: 0 }, // 👈 thêm
         ).lean()
       : [];
     const quanMap = new Map();
+    const lichBookXeMap = new Map(); // 👈 thêm
     dataCHDocs.forEach((d) => {
       const key = normalizeMaCh(d.mach);
-      if (key) quanMap.set(key, d.quan || "");
+      if (key) {
+        quanMap.set(key, d.quan || "");
+        lichBookXeMap.set(key, d.lich_di_hang_bookxe || ""); // 👈 thêm
+      }
     });
-
     const historyDocs = maChList.length
       ? await HistoryBookXe.find({ ma_ch: { $in: maChList } })
           .sort({ createdAt: -1 })
@@ -561,11 +564,12 @@ const suggestBookXe = async (req, res) => {
         : "CS";
       const ncv = ncvGoiYMap.get(maCh) || {};
       const quan = quanMap.get(normalizeMaCh(maCh)) || "";
+      const lich_di_hang_bookxe = lichBookXeMap.get(normalizeMaCh(maCh)) || ""; // 👈 thêm
       const trangThaiSoan = g.coDangSoan
         ? "Đang soạn"
         : g.coChuaSoan
           ? "Chưa soạn"
-          : "Hoàn thành"; // 👈 thêm nhánh Chưa soạn
+          : "Hoàn thành";
       return {
         nguon: "kien_moi",
         sourceId: groupKey,
@@ -576,9 +580,10 @@ const suggestBookXe = async (req, res) => {
         ma_ncv: ncv.ma_ncv || "",
         ten_nvc: ncv.ten_nvc || "",
         lich_di_hang: g.lich_di_hang,
+        lich_di_hang_bookxe, // 👈 thêm
         chuyen: g.chuyen,
         loaiCuaHang,
-        trangThaiSoan, // 👈 dùng biến mới
+        trangThaiSoan,
         lenhDieuDongLienQuan: Array.from(lddMap.get(maCh) || []),
         coGiaoKhach: g.coGiaoKhach,
         ngayGiaoKhach: g.coGiaoKhach ? g.ngayPhatSinh : null,
@@ -588,10 +593,11 @@ const suggestBookXe = async (req, res) => {
       };
     });
 
-    const kienRotItems = rotKienDocs.map((r) => {
+      const kienRotItems = rotKienDocs.map((r) => {
       const maCh = (r.maCH || "").toString();
       const ncv = ncvGoiYMap.get(maCh) || {};
       const quan = quanMap.get(normalizeMaCh(maCh)) || "";
+      const lich_di_hang_bookxe = lichBookXeMap.get(normalizeMaCh(maCh)) || ""; // 👈 thêm
       return {
         nguon: "kien_rot",
         sourceId: r._id.toString(),
@@ -602,6 +608,7 @@ const suggestBookXe = async (req, res) => {
         ma_ncv: ncv.ma_ncv || "",
         ten_nvc: ncv.ten_nvc || "",
         lich_di_hang: "",
+        lich_di_hang_bookxe, // 👈 thêm
         loaiCuaHang: "",
         trangThaiSoan: "",
         lenhDieuDongLienQuan: Array.from(lddMap.get(maCh) || []),
@@ -611,7 +618,7 @@ const suggestBookXe = async (req, res) => {
         ghiChuRotKien: r.ghiChu || "",
         nhanSuSoanIds: [],
         rotKienIds: [r._id.toString()],
-        tungGhepChungVoi: getTungGhepChung(maCh), // 👈 mới
+        tungGhepChungVoi: getTungGhepChung(maCh),
       };
     });
 

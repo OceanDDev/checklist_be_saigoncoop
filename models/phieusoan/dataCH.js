@@ -8,6 +8,7 @@ const dataCHSchema = new mongoose.Schema({
    quan: { type: String, required: true },
   chuyen: { type: String, required: true },
   lich_di_hang: { type: String, required: true },
+  lich_di_hang_bookxe:{ type: String, required: true },
   ghi_chu_ch: { type: String, required: false },
   ngay_import: { type: Date, default: Date.now },
 });

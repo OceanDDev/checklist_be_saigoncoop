@@ -36,9 +36,11 @@ exports.getAllDataCH = async (req, res) => {
     // Run song: count + find
     const [total, dataCHs] = await Promise.all([
       DataCH.countDocuments(filter),
-      DataCH.find(filter).sort({ ngay_import: -1 }).skip(skip).limit(limitNum),
+      DataCH.find(filter)
+        .sort({ ngay_import: -1, _id: 1 }) // 👈 thêm _id để phá tie
+        .skip(skip)
+        .limit(limitNum),
     ]);
-
     res.status(200).json({
       data: dataCHs,
       pagination: {
@@ -92,13 +94,17 @@ exports.importManyDataCH = async (req, res) => {
     console.log(`📦 Bắt đầu import batch: ${data.length} records`);
 
     // ✅ VALIDATE TẤT CẢ RECORDS TRƯỚC
-     const invalidRecords = data.filter(
-      (record) => !record.mach || !record.tench || !record.lich_di_hang,
+    const invalidRecords = data.filter(
+      (record) =>
+        !record.mach ||
+        !record.tench ||
+        !record.lich_di_hang ||
+        !record.lich_di_hang_bookxe, // 👈 thêm
     );
 
     if (invalidRecords.length > 0) {
       return res.status(400).json({
-        message: `Có ${invalidRecords.length} records thiếu mach, tench hoặc lich_di_hang`,
+        message: `Có ${invalidRecords.length} records thiếu mach, tench, lich_di_hang hoặc lich_di_hang_bookxe`, // 👈 cập nhật message
         invalidRecords: invalidRecords.slice(0, 5),
       });
     }
@@ -119,7 +125,8 @@ exports.importManyDataCH = async (req, res) => {
             tench: record.tench,
             quan: record.quan || "",
             chuyen: normalizeChuyen(record.chuyen), // 👈 sửa ở đây
-              lich_di_hang: record.lich_di_hang || "",
+            lich_di_hang: record.lich_di_hang || "",
+            lich_di_hang_bookxe: record.lich_di_hang_bookxe || "",
             ghi_chu_ch: record.ghi_chu_ch || "",
             ngay_cap_nhat: new Date(),
           },
