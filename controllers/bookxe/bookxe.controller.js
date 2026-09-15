@@ -339,12 +339,31 @@ const updateTrangThai = async (req, res) => {
 const deleteBookXe = async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Lấy trước để biết những phiếu NhanSuSoan/RotKien nào cần trả về trạng
+    // thái ban đầu sau khi xoá chuyến này.
     const deleted = await BookXe.findByIdAndDelete(id);
 
     if (!deleted) {
       return res
         .status(404)
         .json({ success: false, message: "Không tìm thấy phiếu book xe" });
+    }
+
+    const nhanSuSoanIds = deleted.nhan_su_soan_ids || [];
+    const rotKienIds = deleted.rot_kien_ids || [];
+
+    if (nhanSuSoanIds.length) {
+      await NhanSuSoan.updateMany(
+        { _id: { $in: nhanSuSoanIds } },
+        { $set: { trangThaiBookXe: "Chờ Book" } },
+      );
+    }
+    if (rotKienIds.length) {
+      await RotKien.updateMany(
+        { _id: { $in: rotKienIds } },
+        { $set: { trangThai: false } },
+      );
     }
 
     return res.status(200).json({ success: true, message: "Xóa thành công" });
@@ -368,7 +387,31 @@ const deleteManyBookXe = async (req, res) => {
         .json({ success: false, message: "Danh sách id không hợp lệ" });
     }
 
+    // Lấy trước danh sách các phiếu sẽ bị xoá để cascade trả trạng thái
+    const docsToDelete = await BookXe.find(
+      { _id: { $in: ids } },
+      { nhan_su_soan_ids: 1, rot_kien_ids: 1 },
+    ).lean();
+
+    const allNhanSuSoanIds = docsToDelete.flatMap(
+      (d) => d.nhan_su_soan_ids || [],
+    );
+    const allRotKienIds = docsToDelete.flatMap((d) => d.rot_kien_ids || []);
+
     const result = await BookXe.deleteMany({ _id: { $in: ids } });
+
+    if (allNhanSuSoanIds.length) {
+      await NhanSuSoan.updateMany(
+        { _id: { $in: allNhanSuSoanIds } },
+        { $set: { trangThaiBookXe: "Chờ Book" } },
+      );
+    }
+    if (allRotKienIds.length) {
+      await RotKien.updateMany(
+        { _id: { $in: allRotKienIds } },
+        { $set: { trangThai: false } },
+      );
+    }
 
     return res.status(200).json({
       success: true,
@@ -384,7 +427,6 @@ const deleteManyBookXe = async (req, res) => {
     });
   }
 };
-
 // Thêm hàm helper này cạnh normalizeMaCh ở đầu file
 const toYMD = (date) => {
   if (!date) return null;
@@ -399,7 +441,7 @@ const suggestBookXe = async (req, res) => {
   try {
     const phieuTrongNgay = await NhanSuSoan.find({
       trangThaiBookXe: "Chờ Book",
-      trangThai: { $in: ["Hoàn thành", "Đang soạn"] },
+      trangThai: { $in: ["Hoàn thành", "Đang soạn", "Chưa soạn"] }, // 👈 thêm Chưa soạn
     }).lean();
 
     const groupMap = new Map();
@@ -420,20 +462,24 @@ const suggestBookXe = async (req, res) => {
           kien: 0,
           lich_di_hang: p.lichDiHang || "",
           soDonHangMau: p.soDonHang || "",
+          coChuaSoan: false, // 👈 thêm
+
           coDangSoan: false,
           coGiaoKhach: isGiaoKhach,
           ngayPhatSinh: toYMD(p.tgHoanThanh || p.tgNhanPhieu),
           nhanSuSoanIds: [],
+          chuyen: p.chuyen || "",
         });
       }
       const g = groupMap.get(groupKey);
       const soKien =
-        p.trangThai === "Đang soạn"
+        p.trangThai === "Đang soạn" || p.trangThai === "Chưa soạn"
           ? Number(p.kien_du_kien ?? 0)
           : Number(p.kien ?? 0);
       g.kien += soKien;
       g.nhanSuSoanIds.push(p._id.toString());
       if (p.trangThai === "Đang soạn") g.coDangSoan = true;
+      if (p.trangThai === "Chưa soạn") g.coChuaSoan = true; // 👈 thêm
     });
 
     const groupKeys = Array.from(groupMap.keys());
@@ -504,7 +550,7 @@ const suggestBookXe = async (req, res) => {
       if (h.lenh_dieu_dong) lddMap.get(h.ma_ch).add(h.lenh_dieu_dong);
     });
 
-     const kienMoiItems = groupKeys.map((groupKey) => {
+    const kienMoiItems = groupKeys.map((groupKey) => {
       const g = groupMap.get(groupKey);
       const maCh = g.ma_ch;
       const loaiCuaHang = g.soDonHangMau
@@ -515,6 +561,11 @@ const suggestBookXe = async (req, res) => {
         : "CS";
       const ncv = ncvGoiYMap.get(maCh) || {};
       const quan = quanMap.get(normalizeMaCh(maCh)) || "";
+      const trangThaiSoan = g.coDangSoan
+        ? "Đang soạn"
+        : g.coChuaSoan
+          ? "Chưa soạn"
+          : "Hoàn thành"; // 👈 thêm nhánh Chưa soạn
       return {
         nguon: "kien_moi",
         sourceId: groupKey,
@@ -525,14 +576,15 @@ const suggestBookXe = async (req, res) => {
         ma_ncv: ncv.ma_ncv || "",
         ten_nvc: ncv.ten_nvc || "",
         lich_di_hang: g.lich_di_hang,
+        chuyen: g.chuyen,
         loaiCuaHang,
-        trangThaiSoan: g.coDangSoan ? "Đang soạn" : "Hoàn thành",
+        trangThaiSoan, // 👈 dùng biến mới
         lenhDieuDongLienQuan: Array.from(lddMap.get(maCh) || []),
         coGiaoKhach: g.coGiaoKhach,
         ngayGiaoKhach: g.coGiaoKhach ? g.ngayPhatSinh : null,
         nhanSuSoanIds: g.nhanSuSoanIds,
         rotKienIds: [],
-        tungGhepChungVoi: getTungGhepChung(maCh), // 👈 mới
+        tungGhepChungVoi: getTungGhepChung(maCh),
       };
     });
 

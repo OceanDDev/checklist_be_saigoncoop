@@ -1,4 +1,5 @@
 const DataCH = require("../../models/phieusoan/dataCH");
+const { normalizeChuyen } = require("../../utils/normalizeChuyen");
 
 // Lấy tất cả dữ liệu cửa hàng
 exports.getAllDataCH = async (req, res) => {
@@ -63,10 +64,13 @@ exports.getDataCHById = async (req, res) => {
   }
 };
 
-// Thêm một cửa hàng
 exports.addDataCH = async (req, res) => {
   try {
-    const newDataCH = new DataCH(req.body);
+    const payload = {
+      ...req.body,
+      chuyen: normalizeChuyen(req.body.chuyen), // 👈 thêm
+    };
+    const newDataCH = new DataCH(payload);
     await newDataCH.save();
     res
       .status(201)
@@ -75,7 +79,6 @@ exports.addDataCH = async (req, res) => {
     res.status(400).json({ message: "Lỗi khi thêm dữ liệu cửa hàng", error });
   }
 };
-
 exports.importManyDataCH = async (req, res) => {
   try {
     const { data } = req.body;
@@ -115,7 +118,7 @@ exports.importManyDataCH = async (req, res) => {
             so_document: record.so_document || null,
             tench: record.tench,
             quan: record.quan || "",
-            chuyen: record.chuyen || "",
+            chuyen: normalizeChuyen(record.chuyen), // 👈 sửa ở đây
               lich_di_hang: record.lich_di_hang || "",
             ghi_chu_ch: record.ghi_chu_ch || "",
             ngay_cap_nhat: new Date(),
@@ -183,10 +186,14 @@ exports.importManyDataCH = async (req, res) => {
   }
 };
 
-// Cập nhật dữ liệu cửa hàng
+// exports.updateDataCH
 exports.updateDataCH = async (req, res) => {
   try {
-    const updated = await DataCH.findByIdAndUpdate(req.params.id, req.body, {
+    const payload = { ...req.body };
+    if (payload.chuyen !== undefined) {
+      payload.chuyen = normalizeChuyen(payload.chuyen); // 👈 thêm
+    }
+    const updated = await DataCH.findByIdAndUpdate(req.params.id, payload, {
       new: true,
     });
     if (!updated)
