@@ -11,7 +11,7 @@ const parseReportNumber = (raw) => {
   if (raw === null || raw === undefined) return 0;
   let s = raw.toString().trim();
   if (!s) return 0;
-  let negative = false;
+  let negative = false; 
   if (s.endsWith("-")) {
     negative = true;
     s = s.slice(0, -1);
@@ -39,8 +39,8 @@ const parseExcelNumber = (raw) => {
 /*      4  Số LPN           -> lpn                                    */
 /*      6  Vị trí           -> slot                                   */
 /*      11 Tổng SL (Onhand) -> luong_onhand                           */
-/*      15 Tổng SL (Available) -> luong_available                     */
-/*      19 Tổng SL (Allocated) -> luong_allocate                      */
+/*    ⚠️ Đã bỏ luong_available (cột 15) / luong_allocate (cột 19) —    */
+/*    không còn trong model.                                          */
 /* ------------------------------------------------------------------ */
 const COL = {
   sku: 0,
@@ -48,8 +48,6 @@ const COL = {
   lpn: 4,
   slot: 6,
   luong_onhand: 11,
-  luong_available: 15,
-  luong_allocate: 19,
 };
 
 const parseExcelTonKho = (fileBuffer) => {
@@ -68,14 +66,17 @@ const parseExcelTonKho = (fileBuffer) => {
     const sku = (row[COL.sku] ?? "").toString().trim();
     if (!sku) return; // bỏ qua dòng trống / dòng tổng cuối bảng
 
+    // ⚠️ "HANGTRUNGCHUYEN" là mã giả cho hàng trung chuyển, không phải
+    // SKU sản phẩm thật -> loại bỏ, không đưa vào so khớp/lưu DB.
+    const skuNoSpace = sku.toUpperCase().replace(/\s+/g, "");
+    if (skuNoSpace === "HANGTRUNGCHUYEN") return;
+
     result.push({
       slot: (row[COL.slot] ?? "").toString().trim(),
       sku: sku.toUpperCase(),
       name: (row[COL.name] ?? "").toString().trim(),
       lpn: (row[COL.lpn] ?? "").toString().trim(),
       luong_onhand: parseExcelNumber(row[COL.luong_onhand]),
-      luong_available: parseExcelNumber(row[COL.luong_available]),
-      luong_allocate: parseExcelNumber(row[COL.luong_allocate]),
     });
   });
 
@@ -84,38 +85,70 @@ const parseExcelTonKho = (fileBuffer) => {
 
 /* ------------------------------------------------------------------ */
 /* 2) Parse file txt báo cáo JDA (Inventory Valuation Report)         */
-/*    Mỗi dòng sản phẩm dạng:                                         */
-/*      <SKU>  <Description...>  <On Hand>  <Unit Retail>  ...        */
-/*    SKU luôn là chuỗi số ở đầu dòng (5-10 chữ số), theo sau bởi ít  */
-/*    nhất 2 khoảng trắng rồi tới Description, rồi tới On Hand (số   */
-/*    dạng report, có thể là ".00" hoặc có dấu "-" ở cuối).           */
+/*                                                                      */
+/*    a) Header xác định KHO — dòng dạng:                             */
+/*         "Store  8101: KHO VE TINH BD (KM)   ---- Home Currency ---" */
+/*       -> kho = "8101", tenKho = "KHO VE TINH BD (KM)"               */
+/*                                                                      */
+/*    b) Mỗi sản phẩm chiếm 2 dòng:                                    */
+/*       Dòng chính (6 số):                                            */
+/*         <SKU>  <Description>  OnHand  UnitRetail  ExtRetail         */
+/*                                UnitCost  ExtCost  G.M.%              */
+/*       Dòng phụ (3 số, không có SKU ở đầu) — các giá trị In-Transit,  */
+/*       KHÔNG dùng tới ở đây.                                          */
+/*                                                                      */
+/*       -> luong_mms lấy số thứ 1 (On Hand) trên dòng chính.           */
+/*       -> cost (đơn giá) lấy số thứ 4 (Unit Cost) trên dòng chính.    */
 /* ------------------------------------------------------------------ */
-const LINE_PATTERN = /^\s*(\d{5,10})\s+(.+?)\s{2,}(-?[\d,]*\.\d{2}-?)\s/;
+const STORE_HEADER_PATTERN = /Store\s+(\d+)\s*:\s*(.+?)(?:\s{2,}|\r?$)/i;
+
+const LINE_PATTERN = /^\s*(\d{5,10})\s+(.+?)\s{2,}(.+)$/;
+
+// Token số trên dòng chính: dấu phẩy ngăn nghìn, 1-2 chữ số thập phân,
+// dấu "-" (âm) có thể ở cuối. VD: "57,500.00", ".04", "100.0", "7.50-"
+const NUMBER_TOKEN_PATTERN = /-?[\d,]*\.\d{1,2}-?/g;
 
 const parseTxtMms = (fileContent) => {
   const text = fileContent.toString("utf8");
   const lines = text.split(/\r?\n/);
 
-  // sku -> { name, luong_mms }. Nếu SKU lặp lại (hiếm gặp), cộng dồn.
+  let kho = "";
+  let tenKho = "";
+
+  // sku -> { name, luong_mms, cost }. Nếu SKU lặp lại (hiếm gặp), cộng
+  // dồn luong_mms, giữ nguyên cost của lần gặp đầu tiên.
   const map = new Map();
 
   lines.forEach((line) => {
+    if (!kho) {
+      const storeMatch = STORE_HEADER_PATTERN.exec(line);
+      if (storeMatch) {
+        kho = storeMatch[1].trim();
+        tenKho = storeMatch[2].trim();
+        return;
+      }
+    }
+
     const m = LINE_PATTERN.exec(line);
     if (!m) return;
 
     const sku = m[1].trim().toUpperCase();
     const name = m[2].trim();
-    const onHand = parseReportNumber(m[3]);
+    const tokens = m[3].match(NUMBER_TOKEN_PATTERN) || [];
+    if (tokens.length === 0) return; // không phải dòng dữ liệu hợp lệ
+
+    const onHand = parseReportNumber(tokens[0]);
+    const cost = tokens.length > 3 ? parseReportNumber(tokens[3]) : 0;
 
     if (map.has(sku)) {
       const prev = map.get(sku);
       prev.luong_mms += onHand;
     } else {
-      map.set(sku, { name, luong_mms: onHand });
+      map.set(sku, { name, luong_mms: onHand, cost });
     }
   });
 
-  return map;
+  return { kho, tenKho, map };
 };
 
 module.exports = {

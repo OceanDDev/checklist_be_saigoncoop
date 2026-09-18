@@ -36,7 +36,6 @@ const normalizeRow = (row) => {
     luong_mms: (row.luong_mms ?? "").toString().trim(),
     cost: (row.cost ?? "").toString().trim(),
     thanh_tien: (row.thanh_tien ?? "").toString().trim(),
-    // ✅ MỚI: kho — không bắt buộc, dùng cho create/update thủ công.
     kho: (row.kho ?? "").toString().trim(),
     thoi_gian_impport: row.thoi_gian_impport
       ? new Date(row.thoi_gian_impport)
@@ -59,7 +58,7 @@ exports.getAll = async (req, res) => {
       lpn,
       slot,
       trangThai,
-      kho, // ✅ MỚI: lọc theo kho
+      kho,
       tuNgay,
       denNgay,
       sortByTrangThai = "true",
@@ -73,7 +72,7 @@ exports.getAll = async (req, res) => {
     if (lpn) filter.lpn = { $regex: lpn, $options: "i" };
     if (slot) filter.slot = { $regex: slot, $options: "i" };
     if (trangThai) filter.trangThai = trangThai;
-    if (kho) filter.kho = kho; // ✅ MỚI
+    if (kho) filter.kho = kho;
 
     if (tuNgay || denNgay) {
       filter.thoi_gian_impport = {};
@@ -272,158 +271,211 @@ exports.update = async (req, res) => {
 /* ------------------------------------------------------------------ */
 const numbersMatch = (a, b) => Math.abs(a - b) < 0.01;
 
+// thanh_tien = luong onhand (dòng chi tiết) * cost. Để trống nếu không
+// có cost hợp lệ.
+const tinhThanhTien = (luongOnhand, costNumber) => {
+  if (costNumber === undefined || costNumber === null) return "";
+  if (Number.isNaN(costNumber)) return "";
+  return (luongOnhand * costNumber).toString();
+};
+
 /* ------------------------------------------------------------------ */
-/* POST /khuyenmai/match-import — nhận 2 file (excel tồn kho + txt MMS)*/
-/* multipart/form-data, field name: "excelFile" và "txtFile".          */
-/*                                                                      */
-/* Logic:                                                              */
-/*  1. Parse excel -> danh sách chi tiết theo từng slot/LPN.           */
-/*  2. Parse txt   -> { kho, map } — map: sku -> { name, luong_mms,    */
-/*     cost }; kho: lấy từ dòng header "Store xxxx: TÊN KHO..." của    */
-/*     file txt MMS, áp dụng chung cho TOÀN BỘ bản ghi trong lần       */
-/*     import này.                                                     */
-/*     ⚠️ Giả định parseTxtMms giờ trả về { kho, map } thay vì chỉ trả */
-/*     Map như trước — cần cập nhật utils/tonkhoParser.js cho khớp     */
-/*     shape này; nếu shape thực tế khác, báo lại để tôi sửa tiếp.    */
-/*  3. Cộng dồn luong_onhand theo SKU (gộp mọi slot/LPN của SKU đó).   */
-/*  4. Với mỗi SKU có trong excel: so khớp tổng luong_onhand vs        */
-/*     luong_mms (nếu txt có SKU đó) -> gắn trangThai cho MỌI dòng chi */
-/*     tiết (slot/LPN) của SKU đó (denormalize để hiển thị bảng dễ).   */
-/*     cost lấy từ MMS; thanh_tien = luong_onhand (dòng chi tiết) *    */
-/*     cost (nếu có cost, ngược lại để trống). kho gắn cho MỌI dòng.   */
-/*  5. Với SKU chỉ có trong txt (không có trong excel) -> tạo 1 dòng   */
-/*     riêng, không có slot/lpn, trangThai = "Không có DATA".          */
-/*  6. Ghi đè toàn bộ collection bằng dữ liệu mới (đây là ảnh chụp tồn */
-/*     kho tại thời điểm import, không cộng dồn qua các lần import).   */
+/* Xử lý so khớp 1 CẶP file (excel tồn kho + txt MMS) cho 1 kho cụ    */
+/* thể. Trả về { docs, stats } hoặc throw Error nếu file txt không    */
+/* đúng kho mong đợi (validate theo header "Store <số>: ...").         */
 /* ------------------------------------------------------------------ */
-exports.matchImport = async (req, res) => {
-  try {
-    const excelFile = req.files?.excelFile?.[0];
-    const txtFile = req.files?.txtFile?.[0];
+const matchKhoPair = ({ excelBuffer, txtBuffer, expectedKho, now }) => {
+  const excelRows = parseExcelTonKho(excelBuffer);
+  const { kho: actualKho, tenKho, map: txtMap } = parseTxtMms(txtBuffer);
 
-    if (!excelFile || !txtFile) {
-      return res.status(400).json({
-        message: "Cần upload đủ 2 file: excelFile (tồn kho) và txtFile (MMS).",
-      });
+  if (excelRows.length === 0) {
+    throw Object.assign(
+      new Error(`File Excel tồn kho (kho ${expectedKho}) không đọc được dữ liệu.`),
+      { status: 400 },
+    );
+  }
+
+  if (!actualKho) {
+    throw Object.assign(
+      new Error(
+        `Không tìm thấy dòng "Store ...: ..." trong file txt MMS (kho ${expectedKho}). File có đúng định dạng báo cáo MMS không?`,
+      ),
+      { status: 400 },
+    );
+  }
+
+  if (actualKho !== expectedKho.toString()) {
+    throw Object.assign(
+      new Error(
+        `File txt MMS bạn upload cho kho ${expectedKho} lại là dữ liệu của kho ${actualKho} (${tenKho}). Vui lòng kiểm tra lại file.`,
+      ),
+      { status: 400 },
+    );
+  }
+
+  // ─── Cộng dồn luong_onhand theo SKU (gộp mọi slot/LPN) ─────────────
+  const onhandBySku = new Map();
+  excelRows.forEach((row) => {
+    onhandBySku.set(
+      row.sku,
+      (onhandBySku.get(row.sku) || 0) + row.luong_onhand,
+    );
+  });
+
+  const resolveTrangThai = (sku) => {
+    const mmsEntry = txtMap.get(sku);
+    if (!mmsEntry) {
+      return { trangThai: "Không có DATA", luong_mms: "", cost: undefined };
     }
+    const tongOnhand = onhandBySku.get(sku) || 0;
+    const khop = numbersMatch(tongOnhand, mmsEntry.luong_mms);
+    return {
+      trangThai: khop ? "Khớp" : "Không Khớp",
+      luong_mms: mmsEntry.luong_mms.toString(),
+      cost: mmsEntry.cost,
+    };
+  };
 
-    const excelRows = parseExcelTonKho(excelFile.buffer);
-    // ✅ MỚI: parseTxtMms giờ trả về { kho, map } — kho lấy từ dòng header
-    // "Store xxxx: TÊN KHO..." của file txt MMS.
-    const { kho = "", map: txtMap } = parseTxtMms(txtFile.buffer);
+  const docs = [];
 
-    if (excelRows.length === 0) {
-      return res
-        .status(400)
-        .json({ message: "Không đọc được dữ liệu từ file Excel." });
-    }
-
-    // ─── Bước 1: cộng dồn luong_onhand theo SKU (gộp mọi slot/LPN) ────
-    const onhandBySku = new Map();
-    excelRows.forEach((row) => {
-      onhandBySku.set(
-        row.sku,
-        (onhandBySku.get(row.sku) || 0) + row.luong_onhand,
-      );
+  // ─── Dòng chi tiết từ excel ─────────────────────────────────────────
+  excelRows.forEach((row) => {
+    const { trangThai, luong_mms, cost } = resolveTrangThai(row.sku);
+    docs.push({
+      slot: row.slot,
+      sku: row.sku,
+      name: row.name,
+      lpn: row.lpn,
+      luong_onhand: row.luong_onhand.toString(),
+      luong_mms,
+      cost: cost !== undefined ? cost.toString() : "",
+      thanh_tien: tinhThanhTien(row.luong_onhand, cost),
+      kho: expectedKho,
+      trangThai,
+      thoi_gian_impport: now,
     });
+  });
 
-    // ─── Bước 2: xác định trangThai + luong_mms + cost cho từng SKU ───
-    const resolveTrangThai = (sku) => {
-      const mmsEntry = txtMap.get(sku);
-      if (!mmsEntry) {
-        return { trangThai: "Không có DATA", luong_mms: "", cost: "" };
-      }
-      const tongOnhand = onhandBySku.get(sku) || 0;
-      const khop = numbersMatch(tongOnhand, mmsEntry.luong_mms);
-      return {
-        trangThai: khop ? "Khớp" : "Không Khớp",
-        luong_mms: mmsEntry.luong_mms.toString(),
-        cost:
-          mmsEntry.cost !== undefined && mmsEntry.cost !== null
-            ? mmsEntry.cost.toString()
-            : "",
-      };
-    };
-
-    // thanh_tien = số lượng onhand của DÒNG CHI TIẾT (không phải tổng SKU)
-    // nhân với đơn giá cost từ MMS. Để trống nếu không có cost.
-    const tinhThanhTien = (luongOnhand, costStr) => {
-      const cost = Number(costStr);
-      if (!costStr || Number.isNaN(cost)) return "";
-      return (luongOnhand * cost).toString();
-    };
-
-    const now = new Date();
-    const docsToInsert = [];
-
-    // ─── Bước 3: build document cho từng dòng chi tiết từ excel ───────
-    excelRows.forEach((row) => {
-      const { trangThai, luong_mms, cost } = resolveTrangThai(row.sku);
-      docsToInsert.push({
-        slot: row.slot,
-        sku: row.sku,
-        name: row.name,
-        lpn: row.lpn,
-        luong_onhand: row.luong_onhand.toString(),
-        luong_mms,
-        cost,
-        thanh_tien: tinhThanhTien(row.luong_onhand, cost),
-        kho, // ✅ MỚI: cùng 1 giá trị kho cho toàn bộ lần import này
-        trangThai,
+  // ─── SKU chỉ có ở file txt (MMS) mà excel không có ─────────────────
+  let soSkuChiCoOTxt = 0;
+  txtMap.forEach((entry, sku) => {
+    if (!onhandBySku.has(sku)) {
+      soSkuChiCoOTxt += 1;
+      docs.push({
+        slot: "",
+        sku,
+        name: entry.name,
+        lpn: "",
+        luong_onhand: "0",
+        luong_mms: entry.luong_mms.toString(),
+        cost: entry.cost !== undefined ? entry.cost.toString() : "",
+        thanh_tien: tinhThanhTien(0, entry.cost),
+        kho: expectedKho,
+        trangThai: "Không có DATA",
         thoi_gian_impport: now,
       });
-    });
+    }
+  });
 
-    // ─── Bước 4: SKU chỉ có ở file txt (MMS) mà excel không có ────────
-    const skuKhongCoOExcel = [];
-    txtMap.forEach((entry, sku) => {
-      if (!onhandBySku.has(sku)) {
-        skuKhongCoOExcel.push(sku);
-        const cost =
-          entry.cost !== undefined && entry.cost !== null
-            ? entry.cost.toString()
-            : "";
-        docsToInsert.push({
-          slot: "",
-          sku,
-          name: entry.name,
-          lpn: "",
-          luong_onhand: "0",
-          luong_mms: entry.luong_mms.toString(),
-          cost,
-          thanh_tien: tinhThanhTien(0, cost),
-          kho, // ✅ MỚI
-          trangThai: "Không có DATA",
-          thoi_gian_impport: now,
-        });
-      }
-    });
+  // ─── Thống kê theo SKU (không tính theo dòng chi tiết) ─────────────
+  let khop = 0;
+  let khongKhop = 0;
+  let khongCoData = 0;
+  const allSkus = new Set([...onhandBySku.keys(), ...txtMap.keys()]);
+  allSkus.forEach((sku) => {
+    const { trangThai } = resolveTrangThai(sku);
+    if (trangThai === "Khớp") khop += 1;
+    else if (trangThai === "Không Khớp") khongKhop += 1;
+    else khongCoData += 1;
+  });
 
-    // ─── Bước 5: ghi đè toàn bộ collection (ảnh chụp mới) ──────────────
-    await TonKho.deleteMany({});
-    await TonKho.insertMany(docsToInsert, { ordered: false });
-
-    // ─── Tổng hợp thống kê theo SKU (không tính theo dòng chi tiết) ───
-    let khop = 0;
-    let khongKhop = 0;
-    let khongCoData = 0;
-    const allSkus = new Set([...onhandBySku.keys(), ...txtMap.keys()]);
-    allSkus.forEach((sku) => {
-      const { trangThai } = resolveTrangThai(sku);
-      if (trangThai === "Khớp") khop += 1;
-      else if (trangThai === "Không Khớp") khongKhop += 1;
-      else khongCoData += 1;
-    });
-
-    return res.status(200).json({
-      message: "Import & so khớp hoàn tất.",
-      kho, // ✅ MỚI: trả kèm để FE hiển thị
-      tongSoDongChiTiet: docsToInsert.length,
+  return {
+    docs,
+    stats: {
+      kho: expectedKho,
+      tenKho,
+      tongSoDongChiTiet: docs.length,
       tongSoSku: allSkus.size,
       soSkuTrongExcel: onhandBySku.size,
       soSkuTrongTxt: txtMap.size,
-      soSkuChiCoOTxt: skuKhongCoOExcel.length,
+      soSkuChiCoOTxt,
       thongKe: { khop, khongKhop, khongCoData },
+    },
+  };
+};
+
+/* ------------------------------------------------------------------ */
+/* POST /khuyenmai/match-import — nhận 4 file (2 kho: 810 và 8101),    */
+/* mỗi kho gồm 1 file excel tồn kho + 1 file txt MMS.                  */
+/* multipart/form-data, field name:                                    */
+/*   excel810, txt810, excel8101, txt8101                              */
+/*                                                                      */
+/* Logic:                                                              */
+/*  1. Với MỖI kho (810, 8101): parse cặp excel+txt riêng, validate    */
+/*     header "Store <số>: ..." của file txt phải khớp đúng kho đang   */
+/*     import (vd file txt cho ô "8101" mà header lại là "Store 810"   */
+/*     -> báo lỗi 400, KHÔNG import).                                  */
+/*  2. So khớp luong_onhand (excel) vs luong_mms (txt) theo từng SKU,  */
+/*     lấy cost (Unit Cost) từ txt, tính thanh_tien = luong_onhand *   */
+/*     cost cho từng dòng chi tiết. Gắn kho tương ứng cho mọi dòng.    */
+/*  3. Gộp document của cả 2 kho, ghi đè TOÀN BỘ collection (ảnh chụp  */
+/*     tồn kho mới nhất tại thời điểm import, không cộng dồn qua các   */
+/*     lần import trước).                                              */
+/* ------------------------------------------------------------------ */
+exports.matchImport = async (req, res) => {
+  try {
+    const excel810 = req.files?.excel810?.[0];
+    const txt810 = req.files?.txt810?.[0];
+    const excel8101 = req.files?.excel8101?.[0];
+    const txt8101 = req.files?.txt8101?.[0];
+
+    const missingFiles = [];
+    if (!excel810) missingFiles.push("excel810");
+    if (!txt810) missingFiles.push("txt810");
+    if (!excel8101) missingFiles.push("excel8101");
+    if (!txt8101) missingFiles.push("txt8101");
+
+    if (missingFiles.length > 0) {
+      return res.status(400).json({
+        message: `Cần upload đủ 4 file. Còn thiếu: ${missingFiles.join(", ")}.`,
+      });
+    }
+
+    const now = new Date();
+
+    let result810;
+    let result8101;
+    try {
+      result810 = matchKhoPair({
+        excelBuffer: excel810.buffer,
+        txtBuffer: txt810.buffer,
+        expectedKho: "810",
+        now,
+      });
+      result8101 = matchKhoPair({
+        excelBuffer: excel8101.buffer,
+        txtBuffer: txt8101.buffer,
+        expectedKho: "8101",
+        now,
+      });
+    } catch (validationErr) {
+      const status = validationErr.status || 400;
+      return res.status(status).json({ message: validationErr.message });
+    }
+
+    const allDocs = [...result810.docs, ...result8101.docs];
+
+    // ─── Ghi đè toàn bộ collection (ảnh chụp mới, cả 2 kho) ────────────
+    await TonKho.deleteMany({});
+    await TonKho.insertMany(allDocs, { ordered: false });
+
+    return res.status(200).json({
+      message: "Import & so khớp hoàn tất cho cả 2 kho.",
+      tongSoDongChiTiet: allDocs.length,
+      theoKho: {
+        "810": result810.stats,
+        "8101": result8101.stats,
+      },
     });
   } catch (err) {
     console.error("Lỗi matchImport TonKho:", err);

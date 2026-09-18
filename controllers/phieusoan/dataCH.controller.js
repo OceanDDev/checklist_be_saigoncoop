@@ -19,7 +19,7 @@ exports.getAllDataCH = async (req, res) => {
       const orConditions = [];
 
       // String fields — dùng regex
-      const stringFields = ["mach", "tench", "quan", "ghi_chu_ch"];
+      const stringFields = ["mach", "tench", "quan", "quan_bookxe","ghi_chu_ch"];
       stringFields.forEach((field) => orConditions.push({ [field]: regex }));
 
       // Number fields — chỉ add nếu search là số hợp lệ
@@ -124,6 +124,7 @@ exports.importManyDataCH = async (req, res) => {
             so_document: record.so_document || null,
             tench: record.tench,
             quan: record.quan || "",
+            quan_bookxe: record.quan_bookxe || "", // 👈 thêm dòng này
             chuyen: normalizeChuyen(record.chuyen), // 👈 sửa ở đây
             lich_di_hang: record.lich_di_hang || "",
             lich_di_hang_bookxe: record.lich_di_hang_bookxe || "",

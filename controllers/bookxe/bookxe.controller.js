@@ -500,16 +500,18 @@ const suggestBookXe = async (req, res) => {
     const dataCHDocs = maChNormalizedList.length
       ? await DataCH.find(
           { mach: { $in: maChNormalizedList } },
-          { mach: 1, quan: 1, lich_di_hang_bookxe: 1, _id: 0 }, // 👈 thêm
+          { mach: 1, quan: 1, quan_bookxe: 1, lich_di_hang_bookxe: 1, _id: 0 }, // 👈 thêm quan_bookxe: 1
         ).lean()
       : [];
     const quanMap = new Map();
-    const lichBookXeMap = new Map(); // 👈 thêm
+    const quanBookxeMap = new Map(); // 👈 thêm
+    const lichBookXeMap = new Map();
     dataCHDocs.forEach((d) => {
       const key = normalizeMaCh(d.mach);
       if (key) {
         quanMap.set(key, d.quan || "");
-        lichBookXeMap.set(key, d.lich_di_hang_bookxe || ""); // 👈 thêm
+        quanBookxeMap.set(key, d.quan_bookxe || ""); // 👈 thêm
+        lichBookXeMap.set(key, d.lich_di_hang_bookxe || "");
       }
     });
     const historyDocs = maChList.length
@@ -564,6 +566,8 @@ const suggestBookXe = async (req, res) => {
         : "CS";
       const ncv = ncvGoiYMap.get(maCh) || {};
       const quan = quanMap.get(normalizeMaCh(maCh)) || "";
+      const quan_bookxe = quanBookxeMap.get(normalizeMaCh(maCh)) || ""; // 👈 phải có dòng này
+
       const lich_di_hang_bookxe = lichBookXeMap.get(normalizeMaCh(maCh)) || ""; // 👈 thêm
       const trangThaiSoan = g.coDangSoan
         ? "Đang soạn"
@@ -577,6 +581,7 @@ const suggestBookXe = async (req, res) => {
         ten_ch: g.ten_ch,
         kien: g.kien,
         quan,
+        quan_bookxe, // 👈 thêm
         ma_ncv: ncv.ma_ncv || "",
         ten_nvc: ncv.ten_nvc || "",
         lich_di_hang: g.lich_di_hang,
@@ -593,10 +598,12 @@ const suggestBookXe = async (req, res) => {
       };
     });
 
-      const kienRotItems = rotKienDocs.map((r) => {
+    const kienRotItems = rotKienDocs.map((r) => {
       const maCh = (r.maCH || "").toString();
       const ncv = ncvGoiYMap.get(maCh) || {};
       const quan = quanMap.get(normalizeMaCh(maCh)) || "";
+      const quan_bookxe = quanBookxeMap.get(normalizeMaCh(maCh)) || ""; // 👈 phải có dòng này
+
       const lich_di_hang_bookxe = lichBookXeMap.get(normalizeMaCh(maCh)) || ""; // 👈 thêm
       return {
         nguon: "kien_rot",
@@ -605,6 +612,7 @@ const suggestBookXe = async (req, res) => {
         ten_ch: r.tenCH || maCh,
         kien: Number(r.soKienRot ?? 0),
         quan,
+        quan_bookxe, // 👈 thêm
         ma_ncv: ncv.ma_ncv || "",
         ten_nvc: ncv.ten_nvc || "",
         lich_di_hang: "",

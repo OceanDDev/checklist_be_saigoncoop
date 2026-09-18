@@ -6,6 +6,7 @@ const dataCHSchema = new mongoose.Schema({
   mach: { type: String, required: true },
   tench: { type: String, required: true },
    quan: { type: String, required: true },
+   quan_bookxe:{ type: String, required: true },
   chuyen: { type: String, required: true },
   lich_di_hang: { type: String, required: true },
   lich_di_hang_bookxe:{ type: String, required: true },

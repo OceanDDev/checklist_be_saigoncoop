@@ -20,7 +20,8 @@ const {
   importUpdateNhanSuSoan,
   addGiaoKhach,
   getTopNangSuatCongKhai,
-  updateManyKienDuKien
+  updateManyKienDuKien,
+  getKienTheoSoSoda
 } = require("../../controllers/phieusoan/nhansusoan.controller");
 
 const {
@@ -176,6 +177,7 @@ router.delete("/dataCH/:id", verifyToken, dataCHController.deleteDataCH);
 
 router.get("/nhansusoan/top-nang-suat-cong-khai", getTopNangSuatCongKhai);
 router.delete("/nhansusoan/delete-all", verifyToken, deleteAllNhanSuSoan);
+router.post("/nhansusoan/kien-theo-soda",verifyToken, getKienTheoSoSoda);
 router.post("/nhansusoan/import-update", verifyToken, importUpdateNhanSuSoan);
 router.post("/nhansusoan/add-giao-khach", verifyToken, addGiaoKhach);
 router.put("/nhansusoan/update-many-kien-du-kien",verifyToken, updateManyKienDuKien);

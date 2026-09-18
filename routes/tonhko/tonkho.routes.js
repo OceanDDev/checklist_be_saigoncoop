@@ -1,4 +1,3 @@
-// routes/move/khuyenmai.routes.js
 const express = require("express");
 const multer = require("multer");
 const router = express.Router();
@@ -10,17 +9,21 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 // ⚠️ Đặt các route tĩnh ("/import", "/match-import") và bulk "/" (DELETE)
 // TRƯỚC route "/:id" để tránh Express hiểu nhầm là 1 giá trị :id.
-
+  
 // GET /khuyenmai — danh sách (phân trang + lọc + sort ưu tiên trangThai)
 router.get("/tonkho", tonKhoController.getAll);
 
-// POST /khuyenmai/match-import — upload 2 file (excelFile + txtFile),
-// tự parse + so khớp luong_onhand vs luong_mms, ghi đè toàn bộ dữ liệu.
+// POST /khuyenmai/match-import — upload 4 file cho 2 kho (810, 8101):
+// mỗi kho gồm 1 file excel tồn kho + 1 file txt MMS. Tự parse + validate
+// header "Store <số>: ..." của từng file txt khớp đúng kho, so khớp
+// luong_onhand vs luong_mms, ghi đè toàn bộ dữ liệu (cả 2 kho).
 router.post(
   "/tonkho/match-import",
   upload.fields([
-    { name: "excelFile", maxCount: 1 },
-    { name: "txtFile", maxCount: 1 },
+    { name: "excel810", maxCount: 1 },
+    { name: "txt810", maxCount: 1 },
+    { name: "excel8101", maxCount: 1 },
+    { name: "txt8101", maxCount: 1 },
   ]),
   tonKhoController.matchImport,
 );

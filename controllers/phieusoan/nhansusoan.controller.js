@@ -14,7 +14,8 @@ const normalizeMaCh = (raw) => {
   if (/^\d+$/.test(s)) return String(parseInt(s, 10));
   return s.toUpperCase();
 };
-
+const isChuyenPhanBo = (chuyen) =>
+  (chuyen || "").toString().trim().toUpperCase() === "PHÂN BỔ";
 // ─── Helper: lọc khoảng ngày luôn theo giờ VN (UTC+7), không phụ thuộc TZ server ─
 const VN_OFFSET = "+07:00";
 
@@ -324,15 +325,19 @@ const importManyNhanSuSoan = async (req, res) => {
       });
     }
 
-    const dataWithChuyenLichDiHang =
+     const dataWithChuyenLichDiHang =
       await ganThongTinTuDataCHTheoMaCh(toInsert);
     const dataWithTgImport = dataWithChuyenLichDiHang.map((item) => ({
       ...item,
       kien_du_kien:
         item.kien_du_kien && Number(item.kien_du_kien) !== 0
           ? Number(item.kien_du_kien)
-          : 1, // ✅ import vào = 0 (hoặc thiếu) -> mặc định 1
+          : 1,
       tgImport: new Date(),
+      // ✅ Import vào đã là PHÂN BỔ -> khỏi cần Book Xe
+      ...(isChuyenPhanBo(item.chuyen)
+        ? { trangThaiBookXe: "Hoàn thành" }
+        : {}),
     }));
 
     let result = [];
@@ -495,7 +500,6 @@ const getNhanSuSoanById = async (req, res) => {
   }
 };
 
-// ─── Cập nhật 1 phiếu ─────────────────────────────────────────────────────────
 const updateNhanSuSoan = async (req, res) => {
   try {
     const { id } = req.params;
@@ -517,6 +521,11 @@ const updateNhanSuSoan = async (req, res) => {
       if (body.trangThai === "Hoàn thành") {
         body.tgHoanThanh = new Date();
       }
+    }
+
+    // ✅ Chuyến đổi thành PHÂN BỔ -> tự đánh dấu Book Xe Hoàn thành
+    if (body.chuyen !== undefined && isChuyenPhanBo(body.chuyen)) {
+      body.trangThaiBookXe = "Hoàn thành";
     }
 
     const updated = await NhanSuSoan.findByIdAndUpdate(
@@ -545,6 +554,10 @@ const updateManyNhanSuSoan = async (req, res) => {
       delete clean.tgNhanPhieu;
       if (clean.trangThai === "Hoàn thành") clean.tgHoanThanh = now;
       if (clean.trangThai === "Đang soạn") clean.tgNhanPhieu = now;
+      // ✅ Chuyến đổi thành PHÂN BỔ -> tự đánh dấu Book Xe Hoàn thành
+      if (clean.chuyen !== undefined && isChuyenPhanBo(clean.chuyen)) {
+        clean.trangThaiBookXe = "Hoàn thành";
+      }
       return clean;
     };
 
@@ -764,7 +777,7 @@ const importUpdateNhanSuSoan = async (req, res) => {
         kien_du_kien:
           item.kien_du_kien && Number(item.kien_du_kien) !== 0
             ? Number(item.kien_du_kien)
-            : 1, // ✅ giống rule ở importMany
+            : 1,
         chuyen: item.chuyen,
         noiXuatDen: item.noiXuatDen,
         lichDiHang: item.lichDiHang,
@@ -773,6 +786,10 @@ const importUpdateNhanSuSoan = async (req, res) => {
       };
       if (!item.tgNhanPhieu) {
         setPayload.tgNhanPhieu = now;
+      }
+      // ✅ Chuyến là PHÂN BỔ -> tự đánh dấu Book Xe Hoàn thành
+      if (isChuyenPhanBo(item.chuyen)) {
+        setPayload.trangThaiBookXe = "Hoàn thành";
       }
 
       return {
@@ -1045,8 +1062,10 @@ const getTopNangSuatCongKhai = async (req, res) => {
   }
 };
 
-// ─── Cập nhật hàng loạt Kiện Dự Kiến theo soDonHang ───────────────────────────
-// body: { data: [{ soDonHang, kien_du_kien }, ...] }
+// ─── Cập nhật hàng loạt Kiện Dự Kiến theo Mã Cửa Hàng (chia đều cho các phiếu
+// đang "Chưa soạn"/"Đang soạn" của mã đó) ──────────────────────────────────
+// body: { data: [{ maNXD, kien_du_kien }, ...] }
+// kien_du_kien ở đây là TỔNG số kiện của cả mã cửa hàng, không phải của 1 phiếu.
 const updateManyKienDuKien = async (req, res) => {
   try {
     const { data } = req.body;
@@ -1057,35 +1076,43 @@ const updateManyKienDuKien = async (req, res) => {
         .json({ message: "Dữ liệu phải là mảng và không được rỗng" });
     }
 
-    const skipped = []; // { soDonHang, reason }
+    const skipped = []; // { maNXD, reason }
     const validData = [];
 
-    // 1) Validate: cần soDonHang và kien_du_kien là số hợp lệ (>= 0)
+    // 1) Validate: cần maNXD và tổng kiện là số hợp lệ (>= 0)
     data.forEach((item) => {
-      const code = (item.soDonHang || "").toString().trim();
-      if (!code) {
-        skipped.push({ soDonHang: "(trống)", reason: "Thiếu số đơn hàng" });
+      const maNXDRaw = (item.maNXD || "").toString().trim();
+      if (!maNXDRaw) {
+        skipped.push({ maNXD: "(trống)", reason: "Thiếu mã cửa hàng" });
         return;
       }
-      const kdk = Number(item.kien_du_kien);
-      if (Number.isNaN(kdk) || kdk < 0) {
+      const tong = Number(item.kien_du_kien);
+      if (Number.isNaN(tong) || tong < 0) {
         skipped.push({
-          soDonHang: code,
+          maNXD: maNXDRaw,
           reason: "Kiện dự kiến không hợp lệ (phải là số >= 0)",
         });
         return;
       }
-      validData.push({ soDonHang: code, kien_du_kien: kdk });
+      // Làm tròn về số nguyên vì kiện không thể chia lẻ
+      validData.push({ maNXD: maNXDRaw, tong: Math.round(tong) });
     });
 
-    // 2) Loại trùng NGAY TRONG FILE (chỉ giữ dòng cuối cùng — ưu tiên giá trị mới nhất)
-    const seenInFile = new Map();
+    // 2) Gộp các dòng trùng mã cửa hàng trong file (cộng dồn tổng lại,
+    // phòng trường hợp người dùng nhập cùng 1 mã ở 2 dòng khác nhau)
+    const maChMap = new Map(); // normalizedKey -> { maNXDGoc, tong }
     validData.forEach((item) => {
-      seenInFile.set(item.soDonHang.toUpperCase(), item);
+      const key = normalizeMaCh(item.maNXD);
+      if (!key) return;
+      const existing = maChMap.get(key);
+      if (existing) {
+        existing.tong += item.tong;
+      } else {
+        maChMap.set(key, { maNXDGoc: item.maNXD, tong: item.tong });
+      }
     });
-    const dedupedData = Array.from(seenInFile.values());
 
-    if (dedupedData.length === 0) {
+    if (maChMap.size === 0) {
       return res.status(200).json({
         message: `Không có dòng nào hợp lệ để cập nhật. Đã bỏ qua ${skipped.length} dòng.`,
         matchedCount: 0,
@@ -1094,53 +1121,71 @@ const updateManyKienDuKien = async (req, res) => {
       });
     }
 
-    // 3) Kiểm tra tồn tại trong hệ thống theo soDonHang
-    const codesToCheck = dedupedData.map((it) => it.soDonHang);
-    const existingDocs = await NhanSuSoan.find({
-      soDonHang: { $in: codesToCheck },
-    })
-      .collation({ locale: "vi", strength: 2 })
-      .select("soDonHang")
+    // 3) Lấy toàn bộ phiếu đang "Chưa soạn"/"Đang soạn", group theo maNXD
+    // đã chuẩn hoá. Sắp xếp theo tgImport tăng dần để phần dư (nếu có)
+    // rơi vào các phiếu import trước — cho có thứ tự nhất quán.
+    const allPending = await NhanSuSoan.find(
+      { trangThai: { $in: ["Chưa soạn", "Đang soạn"] } },
+      { soDonHang: 1, maNXD: 1, chuyen: 1 }, // 👈 thêm chuyen để lọc PHÂN BỔ
+      { soDonHang: 1, maNXD: 1 },
+    )
+      .sort({ tgImport: 1, createdAt: 1 })
       .lean();
 
-    const existingKeySet = new Set(
-      existingDocs.map((d) => d.soDonHang.toUpperCase()),
-    );
-
-    const toUpdate = [];
-    dedupedData.forEach((item) => {
-      if (!existingKeySet.has(item.soDonHang.toUpperCase())) {
-        skipped.push({
-          soDonHang: item.soDonHang,
-          reason: "Không tìm thấy số đơn hàng trong hệ thống",
-        });
-      } else {
-        toUpdate.push(item);
-      }
+    const pendingByKey = new Map(); // normalizedKey -> [doc, ...]
+    allPending.forEach((doc) => {
+      if (isChuyenPhanBo(doc.chuyen)) return; // ✅ PHÂN BỔ không tính kiện dự kiến
+      const key = normalizeMaCh(doc.maNXD);
+      if (!key) return;
+      if (!pendingByKey.has(key)) pendingByKey.set(key, []);
+      pendingByKey.get(key).push(doc);
     });
 
-    if (toUpdate.length === 0) {
+    // 4) Chia đều tổng kiện cho các phiếu của từng mã cửa hàng
+    const bulkOps = [];
+    let soMaCuaHangCapNhatDuoc = 0;
+
+    maChMap.forEach(({ maNXDGoc, tong }, key) => {
+      const docs = pendingByKey.get(key);
+      if (!docs || docs.length === 0) {
+        skipped.push({
+          maNXD: maNXDGoc,
+          reason:
+            "Không có phiếu 'Chưa soạn'/'Đang soạn' nào của mã cửa hàng này",
+        });
+        return;
+      }
+
+      const n = docs.length;
+      const base = Math.floor(tong / n);
+      const du = tong - base * n; // 0 <= du < n, số phiếu được +1 kiện
+
+      docs.forEach((doc, idx) => {
+        const kienChoPhieuNay = base + (idx < du ? 1 : 0);
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: doc._id },
+            update: { $set: { kien_du_kien: kienChoPhieuNay } },
+          },
+        });
+      });
+
+      soMaCuaHangCapNhatDuoc += 1;
+    });
+
+    if (bulkOps.length === 0) {
       return res.status(200).json({
-        message: `Không có dòng nào để cập nhật. Đã bỏ qua ${skipped.length} dòng.`,
+        message: `Không có phiếu nào để cập nhật. Đã bỏ qua ${skipped.length} mã cửa hàng.`,
         matchedCount: 0,
         modifiedCount: 0,
         skipped,
       });
     }
 
-    // 4) BulkWrite cập nhật kien_du_kien theo soDonHang
-    const bulkOps = toUpdate.map((item) => ({
-      updateOne: {
-        filter: { soDonHang: item.soDonHang },
-        collation: { locale: "vi", strength: 2 },
-        update: { $set: { kien_du_kien: item.kien_du_kien } },
-      },
-    }));
-
     const result = await NhanSuSoan.bulkWrite(bulkOps, { ordered: false });
 
     res.status(200).json({
-      message: `Đã cập nhật Kiện Dự Kiến cho ${result.modifiedCount} phiếu${
+      message: `Đã cập nhật Kiện Dự Kiến cho ${result.modifiedCount} phiếu thuộc ${soMaCuaHangCapNhatDuoc} mã cửa hàng${
         skipped.length > 0 ? `, bỏ qua ${skipped.length} dòng` : ""
       }`,
       matchedCount: result.matchedCount,
@@ -1149,11 +1194,54 @@ const updateManyKienDuKien = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({
-      message: "Lỗi khi cập nhật hàng loạt Kiện Dự Kiến",
+      message: "Lỗi khi cập nhật hàng loạt Kiện Dự Kiến theo mã cửa hàng",
       error: error.message,
     });
   }
 };
+
+
+// So khớp theo phần SỐ ở cuối soDonHang (SO/TO0012345 -> 12345), bỏ số 0 đầu
+const extractSoNumber = (raw) => {
+  if (!raw) return "";
+  const s = String(raw).trim().toUpperCase();
+  const m = s.match(/(\d+)\s*$/);
+  return m ? String(parseInt(m[1], 10)) : "";
+};
+
+// POST { codes: ["123456", "TO000123", ...] }
+const getKienTheoSoSoda = async (req, res) => {
+  try {
+    const { codes } = req.body;
+    if (!Array.isArray(codes) || codes.length === 0) {
+      return res.status(400).json({ message: "Cần truyền mảng 'codes' và không được rỗng" });
+    }
+
+    const wanted = codes.map((c) => ({ raw: c, key: extractSoNumber(c) }));
+    const allDocs = await NhanSuSoan.find({}, { soDonHang: 1, kien: 1 }).lean();
+
+    const byKey = new Map();
+    allDocs.forEach((doc) => {
+      const key = extractSoNumber(doc.soDonHang);
+      if (key) byKey.set(key, doc); // ⚠️ nếu trùng key (SO & TO cùng số) -> lấy phiếu sau, xem lưu ý bên dưới
+    });
+
+    const found = [];
+    const notFound = [];
+    wanted.forEach(({ raw, key }) => {
+      const doc = key ? byKey.get(key) : null;
+      if (doc) found.push({ code: raw, soDonHang: doc.soDonHang, kien: doc.kien || 0 });
+      else notFound.push(raw);
+    });
+
+    const tongKien = found.reduce((s, x) => s + (x.kien || 0), 0);
+    res.status(200).json({ found, notFound, tongKien });
+  } catch (error) {
+    res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
+
+
 module.exports = {
   createNhanSuSoan,
   importManyNhanSuSoan,
@@ -1171,4 +1259,5 @@ module.exports = {
   addGiaoKhach,
   getTopNangSuatCongKhai,
   updateManyKienDuKien,
+  getKienTheoSoSoda
 };

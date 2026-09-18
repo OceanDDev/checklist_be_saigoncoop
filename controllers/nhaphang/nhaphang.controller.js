@@ -323,9 +323,20 @@ exports.remove = async (req, res) => {
 
 // ─────────────────────────────────────────────
 // IMPORT MANY (tạo mới hàng loạt, dùng cho import Excel — cả Nhập & Let)
-// LPN trùng -> UPSERT (cập nhật lại bản ghi cũ theo dữ liệu file mới)
-// thay vì tạo bản ghi lặp. Match theo (lpn + loai_hinh) để tránh đè nhầm
-// sang bản ghi "Let" trót trùng LPN với bản ghi "Nhập".
+//
+// - Dòng KHÔNG có LPN -> KHÔNG cho import (bỏ qua hẳn, không insert cũng
+//   không upsert). LPN là định danh bắt buộc của 1 dòng nhập.
+// - Không còn coi "trùng LPN" là trùng dòng. 1 LPN có thể nằm ở nhiều
+//   "dãy"/vị trí khác nhau trong cùng phiếu nhập (ví dụ 1 LPN chia ra
+//   DV0089, DV0086, DV0087...) -> mỗi vị trí đó PHẢI là 1 bản ghi riêng,
+//   không được gộp/ghi đè lẫn nhau.
+//
+// Khóa để xác định "đây là cùng 1 dòng hay là dòng mới" (khớp với unique
+// index bên model) là tổ hợp: lpn + loai_hinh + vi_tri + sku + kho
+// -> Đúng khớp CẢ tổ hợp trên (đã tồn tại y hệt dòng đó) => UPDATE lại
+//    (đè các field còn lại như kiện, tổng SL, trạng thái... theo file mới).
+// -> Khác đi dù chỉ 1 phần (khác vị trí, khác SKU, khác kho...) => dòng
+//    mới => INSERT thêm, không đụng tới bản ghi cũ.
 // ─────────────────────────────────────────────
 exports.importMany = async (req, res) => {
   try {
@@ -337,8 +348,23 @@ exports.importMany = async (req, res) => {
         .json({ message: "Danh sách items không hợp lệ hoặc rỗng" });
     }
 
+    // Dòng thiếu LPN -> loại bỏ ngay từ đầu, không import
+    const rejectedNoLpnCount = items.filter(
+      (item) => !item.lpn || String(item.lpn).trim() === "",
+    ).length;
+    const validItems = items.filter(
+      (item) => item.lpn && String(item.lpn).trim() !== "",
+    );
+
+    if (validItems.length === 0) {
+      return res.status(400).json({
+        message: "Tất cả dòng đều thiếu LPN, không có dòng nào để import",
+        rejectedNoLpnCount,
+      });
+    }
+
     const now = new Date();
-    const docs = items.map((item) => ({
+    const docs = validItems.map((item) => ({
       sku: item.sku,
       name: item.name,
       vi_tri: item.vi_tri,
@@ -348,7 +374,7 @@ exports.importMany = async (req, res) => {
         item.tong_sl !== undefined && item.tong_sl !== ""
           ? Number(item.tong_sl)
           : undefined,
-      lpn: item.lpn || undefined,
+      lpn: item.lpn,
       trang_thai: item.trang_thai || "Chưa xử lý",
       loai_hinh: item.loai_hinh || "Nhập",
       nhan_vien_nhap: item.nhan_vien_nhap || undefined,
@@ -370,24 +396,21 @@ exports.importMany = async (req, res) => {
     }));
 
     // "Let" -> 1 LPN có thể được châm hàng nhiều lần -> KHÔNG upsert,
-    // luôn insert như bản ghi mới (kể cả trùng LPN với bản ghi Let khác).
-    // "Nhập"/"Put" hoặc không có LPN -> giữ nguyên logic cũ.
+    // luôn insert như bản ghi mới (kể cả trùng y hệt tổ hợp khóa với 1 bản
+    // ghi Let khác).
+    // "Nhập"/"Put" -> upsert theo tổ hợp khóa bên dưới.
     const letItems = docs.filter((d) => d.loai_hinh === "Let");
-    const nonLetWithLpn = docs.filter((d) => d.loai_hinh !== "Let" && d.lpn);
-    const nonLetWithoutLpn = docs.filter(
-      (d) => d.loai_hinh !== "Let" && !d.lpn,
-    );
-    const toInsertDirectly = [...letItems, ...nonLetWithoutLpn];
+    const nonLetItems = docs.filter((d) => d.loai_hinh !== "Let");
 
     let insertedCount = 0;
     let upsertedCount = 0;
     let modifiedCount = 0;
     const writeErrors = [];
 
-    // Let (mọi LPN) + không có LPN -> insert thẳng, không match/upsert
-    if (toInsertDirectly.length > 0) {
+    // Let -> insert thẳng, không match/upsert
+    if (letItems.length > 0) {
       try {
-        const inserted = await NhapHang.insertMany(toInsertDirectly, {
+        const inserted = await NhapHang.insertMany(letItems, {
           ordered: false,
         });
         insertedCount += inserted.length;
@@ -406,12 +429,19 @@ exports.importMany = async (req, res) => {
       }
     }
 
-    // Nhập/Put có LPN -> upsert theo (lpn + loai_hinh): LPN mới -> tạo mới,
-    // LPN đã tồn tại -> ghi đè toàn bộ field theo dữ liệu file mới
-    if (nonLetWithLpn.length > 0) {
-      const bulkOps = nonLetWithLpn.map((doc) => ({
+    // Nhập/Put -> upsert theo tổ hợp đầy đủ (lpn + loai_hinh + vi_tri +
+    // sku + kho): đúng khớp cả tổ hợp -> update lại bản ghi cũ; khác đi
+    // (vd cùng LPN nhưng khác vi_tri) -> insert thành dòng mới.
+    if (nonLetItems.length > 0) {
+      const bulkOps = nonLetItems.map((doc) => ({
         updateOne: {
-          filter: { lpn: doc.lpn, loai_hinh: doc.loai_hinh },
+          filter: {
+            lpn: doc.lpn,
+            loai_hinh: doc.loai_hinh,
+            vi_tri: doc.vi_tri,
+            sku: doc.sku,
+            kho: doc.kho,
+          },
           update: { $set: doc },
           upsert: true,
         },
@@ -425,10 +455,15 @@ exports.importMany = async (req, res) => {
     }
 
     return res.status(201).json({
-      message: `Import xong: ${insertedCount} dòng mới (Let/không LPN), ${upsertedCount} LPN mới, ${modifiedCount} LPN đã cập nhật lại`,
+      message: `Import xong: ${insertedCount} dòng mới (Let), ${upsertedCount} dòng mới (Nhập/Put), ${modifiedCount} dòng đã cập nhật lại${
+        rejectedNoLpnCount
+          ? `, ${rejectedNoLpnCount} dòng bị bỏ qua do thiếu LPN`
+          : ""
+      }`,
       insertedCount,
       upsertedCount,
       modifiedCount,
+      rejectedNoLpnCount,
       writeErrors: writeErrors.length ? writeErrors : undefined,
     });
   } catch (error) {
