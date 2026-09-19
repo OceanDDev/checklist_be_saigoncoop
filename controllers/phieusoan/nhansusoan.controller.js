@@ -30,6 +30,20 @@ const endOfDayVN = (dateStr) => {
   const d = new Date(`${dateStr}T23:59:59.999${VN_OFFSET}`);
   return Number.isNaN(d.getTime()) ? null : d;
 };
+const layDuoiSo = (str = "") => {
+  const m = String(str).match(/(\d+)\s*$/);
+  return m ? m[1] : "";
+};
+
+// Suy ra tên cửa hàng từ noiXuatDen dạng "MAXH-Maxh-Tên cửa hàng..."
+// Vd: "CH00009-Ch00009-Co.opsmile 173 Pho Co Dieu" -> "Co.opsmile 173 Pho Co Dieu"
+const parseTenCH = (noiXuatDen, maCH) => {
+  if (!noiXuatDen) return "";
+  const parts = noiXuatDen.split("-");
+  if (parts.length > 2) return parts.slice(2).join("-").trim();
+  const re = new RegExp(`^${maCH}[-\\s]*`, "i");
+  return noiXuatDen.replace(re, "").trim();
+};
 
 /** Gắn điều kiện lọc khoảng ngày (giờ VN) cho 1 field ngày vào object filter,
  *  chỉ thêm nếu có ít nhất 1 trong 2 mốc tuNgay/denNgay hợp lệ. */
@@ -325,7 +339,7 @@ const importManyNhanSuSoan = async (req, res) => {
       });
     }
 
-     const dataWithChuyenLichDiHang =
+    const dataWithChuyenLichDiHang =
       await ganThongTinTuDataCHTheoMaCh(toInsert);
     const dataWithTgImport = dataWithChuyenLichDiHang.map((item) => ({
       ...item,
@@ -335,9 +349,7 @@ const importManyNhanSuSoan = async (req, res) => {
           : 1,
       tgImport: new Date(),
       // ✅ Import vào đã là PHÂN BỔ -> khỏi cần Book Xe
-      ...(isChuyenPhanBo(item.chuyen)
-        ? { trangThaiBookXe: "Hoàn thành" }
-        : {}),
+      ...(isChuyenPhanBo(item.chuyen) ? { trangThaiBookXe: "Hoàn thành" } : {}),
     }));
 
     let result = [];
@@ -1200,7 +1212,6 @@ const updateManyKienDuKien = async (req, res) => {
   }
 };
 
-
 // So khớp theo phần SỐ ở cuối soDonHang (SO/TO0012345 -> 12345), bỏ số 0 đầu
 const extractSoNumber = (raw) => {
   if (!raw) return "";
@@ -1209,38 +1220,65 @@ const extractSoNumber = (raw) => {
   return m ? String(parseInt(m[1], 10)) : "";
 };
 
-// POST { codes: ["123456", "TO000123", ...] }
 const getKienTheoSoSoda = async (req, res) => {
   try {
     const { codes } = req.body;
     if (!Array.isArray(codes) || codes.length === 0) {
-      return res.status(400).json({ message: "Cần truyền mảng 'codes' và không được rỗng" });
+      return res.status(400).json({ message: "Thiếu danh sách mã (codes)" });
     }
 
-    const wanted = codes.map((c) => ({ raw: c, key: extractSoNumber(c) }));
-    const allDocs = await NhanSuSoan.find({}, { soDonHang: 1, kien: 1 }).lean();
-
-    const byKey = new Map();
-    allDocs.forEach((doc) => {
-      const key = extractSoNumber(doc.soDonHang);
-      if (key) byKey.set(key, doc); // ⚠️ nếu trùng key (SO & TO cùng số) -> lấy phiếu sau, xem lưu ý bên dưới
+    const orConditions = codes.map((code) => {
+      const escaped = String(code)
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return {
+        soDonHang: { $regex: new RegExp(`^[A-Za-z]*${escaped}$`, "i") },
+      };
     });
 
-    const found = [];
+    const docs = await NhanSuSoan.find({ $or: orConditions }); // 👈 sửa nhanSuSoan -> NhanSuSoan
+
+    const items = [];
     const notFound = [];
-    wanted.forEach(({ raw, key }) => {
-      const doc = key ? byKey.get(key) : null;
-      if (doc) found.push({ code: raw, soDonHang: doc.soDonHang, kien: doc.kien || 0 });
-      else notFound.push(raw);
-    });
 
-    const tongKien = found.reduce((s, x) => s + (x.kien || 0), 0);
-    res.status(200).json({ found, notFound, tongKien });
+    for (const code of codes) {
+      const doc = docs.find(
+        (d) => layDuoiSo(d.soDonHang) === String(code).trim(),
+      );
+      if (!doc) {
+        notFound.push(code);
+        continue;
+      }
+      items.push({
+        code,
+        soDonHang: doc.soDonHang,
+        maCH: doc.maNXD || "",
+        noiXuatDen: doc.noiXuatDen || "",
+        kien: doc.kien || 0,
+      });
+    }
+
+    const tongKien = items.reduce((sum, it) => sum + (it.kien || 0), 0);
+
+    const distinctMaCH = [
+      ...new Set(items.map((it) => it.maCH).filter(Boolean)),
+    ];
+    const mismatch = distinctMaCH.length > 1;
+
+    let maCH = null;
+    let tenCH = null;
+    if (distinctMaCH.length === 1) {
+      maCH = distinctMaCH[0];
+      const first = items.find((it) => it.maCH === maCH);
+      tenCH = parseTenCH(first?.noiXuatDen, maCH);
+    }
+
+    return res.json({ tongKien, notFound, items, maCH, tenCH, mismatch });
   } catch (error) {
-    res.status(500).json({ message: "Lỗi server", error: error.message });
+    console.error("Lỗi getKienTheoSoSoda:", error);
+    return res.status(500).json({ message: "Lỗi server" });
   }
 };
-
 
 module.exports = {
   createNhanSuSoan,
@@ -1259,5 +1297,5 @@ module.exports = {
   addGiaoKhach,
   getTopNangSuatCongKhai,
   updateManyKienDuKien,
-  getKienTheoSoSoda
+  getKienTheoSoSoda,
 };
