@@ -3,6 +3,7 @@ const router = express.Router();
 
 const bookXeController = require("../../controllers/bookxe/bookxe.controller"); // chỉnh lại path cho đúng vị trí controller thực tế
 const historyBookXeController = require("../../controllers/bookxe/historyBookXe.controller"); // chỉnh lại path cho đúng vị trí controller thực tế
+const nhaXeController = require("../../controllers/bookxe/nhaxe.controller"); // chỉnh lại path cho đúng vị trí controller thực tế
 const { verifyToken } = require("../../middlewares/authMiddleware"); // chỉnh lại path cho đúng vị trí middleware thực tế
 
 // ── BookXe (admin - cần login) ───────────────────────────────────────────────
@@ -57,5 +58,24 @@ router.delete(
   verifyToken,
   historyBookXeController.deleteManyHistoryBookXe,
 );
+
+// ── NhaXe (admin - cần login) ────────────────────────────────────────────────
+router.get("/nhaxe", verifyToken, nhaXeController.getAllNhaXe);
+router.get("/nhaxe/:id", verifyToken, nhaXeController.getNhaXeById);
+router.post("/nhaxe", verifyToken, nhaXeController.createNhaXe);
+router.post("/nhaxe/import-many", verifyToken, nhaXeController.importManyNhaXe);
+// các route PUT tĩnh (update-many, update-many-by-ids) PHẢI đứng trước
+// PUT /nhaxe/:id, không thì Express sẽ hiểu "update-many" là :id
+// và gọi nhầm qua updateNhaXe.
+router.put("/nhaxe/update-many", verifyToken, nhaXeController.updateManyNhaXe);
+router.put(
+  "/nhaxe/update-many-by-ids",
+  verifyToken,
+  nhaXeController.updateManyNhaXeByIds,
+);
+router.put("/nhaxe/:id", verifyToken, nhaXeController.updateNhaXe);
+router.delete("/nhaxe/:id", verifyToken, nhaXeController.deleteNhaXe);
+router.delete("/nhaxe", verifyToken, nhaXeController.deleteManyNhaXe);
+
 // routes/nhansusoan.route.js (hoặc file router tổng hợp)
 module.exports = router;

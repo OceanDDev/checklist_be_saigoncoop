@@ -3,6 +3,7 @@ const NhanSuSoan = require("../../models/phieusoan/nhansusoan");
 const HistoryBookXe = require("../../models/bookxe/historybookxe");
 const DataCH = require("../../models/phieusoan/dataCH");
 const RotKien = require("../../models/dieuvan/rotkien/rotkien");
+const NhaXe = require("../../models/bookxe/nhaxe");
 const normalizeMaCh = (raw) => {
   if (!raw) return "";
   const s = String(raw).trim();
@@ -436,12 +437,38 @@ const toYMD = (date) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
+// ============================================================================
+// CÁCH ÁP DỤNG vào bookxe.controller.js
+//
+// 1) Thêm require ở đầu file (cạnh mấy dòng require model khác):
+//      const NhaXe = require("../../models/bookxe/nhaxe"); // chỉnh path cho đúng
+//
+// 2) Xóa toàn bộ hàm suggestBookXe cũ (từ dòng "// GET /api/book-xe/suggest"
+//    đến hết hàm, ngay trước module.exports) và dán hàm bên dưới vào chỗ đó.
+//    Giữ nguyên helper toYMD và normalizeMaCh đã có sẵn trong file.
+//
+// Thay đổi so với bản cũ:
+//   - quan_bookxe          <- NhaXe.quan            (trước: DataCH.quan_bookxe)
+//   - lich_di_hang_bookxe  <- NhaXe.lich_di_hang    (trước: DataCH.lich_di_hang_bookxe)
+//   - ten_nvc              <- NhaXe.nvc             (trước: HistoryBookXe.ten_nvc)
+//   - ghi_chu_nhaxe        <- NhaXe.ghi_chu         (MỚI, FE dùng để điền sẵn ô Ghi chú)
+//   - ma_ncv: NhaXe không có mã NCV nên vẫn lấy từ HistoryBookXe, nhưng CHỈ khi
+//     tên NVC trong lịch sử trùng với NhaXe.nvc (tránh ghép nhầm mã NCV cũ với
+//     nhà xe mới).
+// ============================================================================
+
 // GET /api/book-xe/suggest
+//
+// THAY ĐỔI so với bản cũ (tìm các dòng có chú thích [MỚI]):
+//  - Chuyến GIAO KHÁCH / KHAI TRƯƠNG vẫn lấy từ NhanSuSoan (p.chuyen).
+//  - Các chuyến còn lại (SÁNG / TRƯA / CHIỀU / TỐI ...) lấy từ NhaXe (field
+//    thoi_gian_xuat), map theo mã CH giống quận / lịch đi hàng / NVC.
+//  - Item kiện rớt cũng có chuyen (từ NhaXe) — trước đây không có.
 const suggestBookXe = async (req, res) => {
   try {
     const phieuTrongNgay = await NhanSuSoan.find({
       trangThaiBookXe: "Chờ Book",
-      trangThai: { $in: ["Hoàn thành", "Đang soạn", "Chưa soạn"] }, // 👈 thêm Chưa soạn
+      trangThai: { $in: ["Hoàn thành", "Đang soạn", "Chưa soạn"] },
     }).lean();
 
     const groupMap = new Map();
@@ -449,9 +476,11 @@ const suggestBookXe = async (req, res) => {
       const maCh = (p.maNXD || "").toString().trim();
       if (!maCh) return;
 
-      const isGiaoKhach =
-        typeof p.chuyen === "string" &&
-        p.chuyen.trim().toLowerCase().includes("giao khách");
+      const chuyenNhanSu = typeof p.chuyen === "string" ? p.chuyen.trim() : "";
+      const isGiaoKhach = chuyenNhanSu.toLowerCase().includes("giao khách");
+      // [MỚI] Chỉ 2 loại chuyến này còn lấy từ NhanSuSoan
+      const isKhaiTruong = chuyenNhanSu.toLowerCase().includes("khai trương");
+      const chuyenDacBiet = isGiaoKhach || isKhaiTruong ? chuyenNhanSu : "";
 
       const groupKey = isGiaoKhach ? `${maCh}::giaokhach` : `${maCh}::thuong`;
 
@@ -462,24 +491,37 @@ const suggestBookXe = async (req, res) => {
           kien: 0,
           lich_di_hang: p.lichDiHang || "",
           soDonHangMau: p.soDonHang || "",
-          coChuaSoan: false, // 👈 thêm
+          coChuaSoan: false,
 
           coDangSoan: false,
           coGiaoKhach: isGiaoKhach,
           ngayPhatSinh: toYMD(p.tgHoanThanh || p.tgNhanPhieu),
           nhanSuSoanIds: [],
-          chuyen: p.chuyen || "",
+          // [MỚI] thay cho `chuyen: p.chuyen || ""` — chỉ giữ GIAO KHÁCH /
+          // KHAI TRƯƠNG, chuyến thường sẽ lấy từ NhaXe ở bước build item.
+          chuyenDacBiet: "",
         });
       }
       const g = groupMap.get(groupKey);
+      // [MỚI] Nhóm có phiếu khai trương / giao khách thì ghi nhận lại
+      if (chuyenDacBiet && !g.chuyenDacBiet) g.chuyenDacBiet = chuyenDacBiet;
+
+      // [MỚI] Chỉ những phiếu đã được cập nhật bằng chức năng "Update Kiện DK"
+      // (cờ daUpdateKienDuKien = true, do updateManyKienDuKien gán) mới luôn lấy
+      // kiện dự kiến, kể cả khi đã Hoàn thành và có kiện thực tế (p.kien).
+      // Kiện dự kiến có sẵn từ lúc import KHÔNG tính — không có cờ thì giữ logic
+      // cũ: Chưa soạn / Đang soạn lấy kiện dự kiến, Hoàn thành lấy kiện thực tế.
+      const kienDuKien = Number(p.kien_du_kien) || 0; // null/undefined/NaN -> 0
+      const chuaSoanXong =
+        p.trangThai === "Đang soạn" || p.trangThai === "Chưa soạn";
       const soKien =
-        p.trangThai === "Đang soạn" || p.trangThai === "Chưa soạn"
-          ? Number(p.kien_du_kien ?? 0)
+        p.daUpdateKienDuKien === true || chuaSoanXong
+          ? kienDuKien
           : Number(p.kien ?? 0);
       g.kien += soKien;
       g.nhanSuSoanIds.push(p._id.toString());
       if (p.trangThai === "Đang soạn") g.coDangSoan = true;
-      if (p.trangThai === "Chưa soạn") g.coChuaSoan = true; // 👈 thêm
+      if (p.trangThai === "Chưa soạn") g.coChuaSoan = true;
     });
 
     const groupKeys = Array.from(groupMap.keys());
@@ -496,24 +538,44 @@ const suggestBookXe = async (req, res) => {
       new Set([...maChListKienMoi, ...maChListKienRot]),
     );
 
+    // DataCH giờ chỉ còn dùng cho field "quan" (quận gốc), không dùng cho book xe nữa
     const maChNormalizedList = maChList.map(normalizeMaCh).filter(Boolean);
     const dataCHDocs = maChNormalizedList.length
       ? await DataCH.find(
           { mach: { $in: maChNormalizedList } },
-          { mach: 1, quan: 1, quan_bookxe: 1, lich_di_hang_bookxe: 1, _id: 0 }, // 👈 thêm quan_bookxe: 1
+          { mach: 1, quan: 1, _id: 0 },
         ).lean()
       : [];
     const quanMap = new Map();
-    const quanBookxeMap = new Map(); // 👈 thêm
-    const lichBookXeMap = new Map();
     dataCHDocs.forEach((d) => {
       const key = normalizeMaCh(d.mach);
-      if (key) {
-        quanMap.set(key, d.quan || "");
-        quanBookxeMap.set(key, d.quan_bookxe || ""); // 👈 thêm
-        lichBookXeMap.set(key, d.lich_di_hang_bookxe || "");
-      }
+      if (key) quanMap.set(key, d.quan || "");
     });
+
+    // ── NhaXe: nguồn cho quận / lịch đi hàng / NVC / ghi chú / CHUYẾN book xe ──
+    // Lấy hết rồi map theo mã CH đã chuẩn hóa (normalizeMaCh) để "0123" và "123"
+    // vẫn khớp nhau — dữ liệu import từ Excel không phải lúc nào cũng cùng định dạng.
+    // Nếu 1 mã CH có nhiều bản ghi thì lấy bản MỚI NHẤT.
+    const nhaXeDocs = await NhaXe.find(
+      {},
+      {
+        ma_ch: 1,
+        quan: 1,
+        lich_di_hang: 1,
+        nvc: 1,
+        ghi_chu: 1,
+        thoi_gian_xuat: 1, // [MỚI] chuyến SÁNG / TRƯA / CHIỀU / TỐI
+        _id: 0,
+      },
+    )
+      .sort({ createdAt: -1 })
+      .lean();
+    const nhaXeMap = new Map();
+    nhaXeDocs.forEach((d) => {
+      const key = normalizeMaCh(d.ma_ch);
+      if (key && !nhaXeMap.has(key)) nhaXeMap.set(key, d);
+    });
+
     const historyDocs = maChList.length
       ? await HistoryBookXe.find({ ma_ch: { $in: maChList } })
           .sort({ createdAt: -1 })
@@ -555,6 +617,27 @@ const suggestBookXe = async (req, res) => {
       if (h.lenh_dieu_dong) lddMap.get(h.ma_ch).add(h.lenh_dieu_dong);
     });
 
+    // Gom toàn bộ thông tin book xe của 1 cửa hàng từ NhaXe (+ mã NCV từ lịch sử)
+    const normalizeText = (s) => (s || "").toString().trim().toLowerCase();
+    const getNhaXeInfo = (maCh) => {
+      const nx = nhaXeMap.get(normalizeMaCh(maCh)) || {};
+      const tenNvc = (nx.nvc || "").toString().trim();
+      const lichSuNcv = ncvGoiYMap.get(maCh) || {};
+      const maNcv =
+        tenNvc && normalizeText(lichSuNcv.ten_nvc) === normalizeText(tenNvc)
+          ? lichSuNcv.ma_ncv || ""
+          : "";
+      return {
+        quan_bookxe: nx.quan || "",
+        lich_di_hang_bookxe: nx.lich_di_hang || "",
+        ten_nvc: tenNvc,
+        ma_ncv: maNcv,
+        ghi_chu_nhaxe: nx.ghi_chu || "",
+        // [MỚI] Chuyến từ NhaXe, viết hoa để đồng nhất với các badge khác
+        chuyen_nhaxe: (nx.thoi_gian_xuat || "").toString().trim().toUpperCase(),
+      };
+    };
+
     const kienMoiItems = groupKeys.map((groupKey) => {
       const g = groupMap.get(groupKey);
       const maCh = g.ma_ch;
@@ -564,11 +647,8 @@ const suggestBookXe = async (req, res) => {
         .startsWith("TO")
         ? "CF"
         : "CS";
-      const ncv = ncvGoiYMap.get(maCh) || {};
+      const nx = getNhaXeInfo(maCh);
       const quan = quanMap.get(normalizeMaCh(maCh)) || "";
-      const quan_bookxe = quanBookxeMap.get(normalizeMaCh(maCh)) || ""; // 👈 phải có dòng này
-
-      const lich_di_hang_bookxe = lichBookXeMap.get(normalizeMaCh(maCh)) || ""; // 👈 thêm
       const trangThaiSoan = g.coDangSoan
         ? "Đang soạn"
         : g.coChuaSoan
@@ -581,12 +661,14 @@ const suggestBookXe = async (req, res) => {
         ten_ch: g.ten_ch,
         kien: g.kien,
         quan,
-        quan_bookxe, // 👈 thêm
-        ma_ncv: ncv.ma_ncv || "",
-        ten_nvc: ncv.ten_nvc || "",
+        quan_bookxe: nx.quan_bookxe,
+        ma_ncv: nx.ma_ncv,
+        ten_nvc: nx.ten_nvc,
         lich_di_hang: g.lich_di_hang,
-        lich_di_hang_bookxe, // 👈 thêm
-        chuyen: g.chuyen,
+        lich_di_hang_bookxe: nx.lich_di_hang_bookxe,
+        ghi_chu_nhaxe: nx.ghi_chu_nhaxe,
+        // [MỚI] GIAO KHÁCH / KHAI TRƯƠNG từ NhanSuSoan, còn lại từ NhaXe
+        chuyen: g.chuyenDacBiet || nx.chuyen_nhaxe,
         loaiCuaHang,
         trangThaiSoan,
         lenhDieuDongLienQuan: Array.from(lddMap.get(maCh) || []),
@@ -600,11 +682,8 @@ const suggestBookXe = async (req, res) => {
 
     const kienRotItems = rotKienDocs.map((r) => {
       const maCh = (r.maCH || "").toString();
-      const ncv = ncvGoiYMap.get(maCh) || {};
+      const nx = getNhaXeInfo(maCh);
       const quan = quanMap.get(normalizeMaCh(maCh)) || "";
-      const quan_bookxe = quanBookxeMap.get(normalizeMaCh(maCh)) || ""; // 👈 phải có dòng này
-
-      const lich_di_hang_bookxe = lichBookXeMap.get(normalizeMaCh(maCh)) || ""; // 👈 thêm
       return {
         nguon: "kien_rot",
         sourceId: r._id.toString(),
@@ -612,11 +691,13 @@ const suggestBookXe = async (req, res) => {
         ten_ch: r.tenCH || maCh,
         kien: Number(r.soKienRot ?? 0),
         quan,
-        quan_bookxe, // 👈 thêm
-        ma_ncv: ncv.ma_ncv || "",
-        ten_nvc: ncv.ten_nvc || "",
+        quan_bookxe: nx.quan_bookxe,
+        ma_ncv: nx.ma_ncv,
+        ten_nvc: nx.ten_nvc,
         lich_di_hang: "",
-        lich_di_hang_bookxe, // 👈 thêm
+        lich_di_hang_bookxe: nx.lich_di_hang_bookxe,
+        ghi_chu_nhaxe: nx.ghi_chu_nhaxe,
+        chuyen: nx.chuyen_nhaxe, // [MỚI] kiện rớt cũng hiện chuyến theo NhaXe
         loaiCuaHang: "",
         trangThaiSoan: "",
         lenhDieuDongLienQuan: Array.from(lddMap.get(maCh) || []),

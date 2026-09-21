@@ -1078,6 +1078,11 @@ const getTopNangSuatCongKhai = async (req, res) => {
 // đang "Chưa soạn"/"Đang soạn" của mã đó) ──────────────────────────────────
 // body: { data: [{ maNXD, kien_du_kien }, ...] }
 // kien_du_kien ở đây là TỔNG số kiện của cả mã cửa hàng, không phải của 1 phiếu.
+//
+// THAY ĐỔI so với bản cũ (tìm dòng có chú thích [MỚI]):
+//  - Mỗi phiếu được cập nhật sẽ được gán cờ daUpdateKienDuKien = true để
+//    suggestBookXe biết phiếu này luôn phải lấy kiện dự kiến (kể cả khi sau đó
+//    chuyển Hoàn thành và có kiện thực tế).
 const updateManyKienDuKien = async (req, res) => {
   try {
     const { data } = req.body;
@@ -1177,7 +1182,12 @@ const updateManyKienDuKien = async (req, res) => {
         bulkOps.push({
           updateOne: {
             filter: { _id: doc._id },
-            update: { $set: { kien_du_kien: kienChoPhieuNay } },
+            update: {
+              $set: {
+                kien_du_kien: kienChoPhieuNay,
+                daUpdateKienDuKien: true, // [MỚI] đánh dấu đã qua chức năng Update Kiện DK
+              },
+            },
           },
         });
       });
@@ -1211,7 +1221,6 @@ const updateManyKienDuKien = async (req, res) => {
     });
   }
 };
-
 // So khớp theo phần SỐ ở cuối soDonHang (SO/TO0012345 -> 12345), bỏ số 0 đầu
 const extractSoNumber = (raw) => {
   if (!raw) return "";

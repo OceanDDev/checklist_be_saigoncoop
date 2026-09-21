@@ -56,17 +56,24 @@ const nhanSuSoanSchema = new mongoose.Schema(
     tgNhanPhieu: {
       type: Date,
     },
-     trangThaiBookXe: {
+    trangThaiBookXe: {
       type: String,
       enum: ["Chờ Book", "Chờ Xe", "Hoàn thành"],
       default: "Chờ Book",
     },
-    kien_du_kien:{
+    kien_du_kien: {
       type: Number,
       default: 0,
     },
+    // [MỚI] true khi phiếu đã được cập nhật bằng chức năng "Update Kiện DK".
+    // suggestBookXe dùng cờ này để luôn lấy kien_du_kien (thay vì kien thực tế),
+    // kể cả khi phiếu đã Hoàn thành. Kiện dự kiến có từ lúc import thì cờ vẫn false.
+    daUpdateKienDuKien: {
+      type: Boolean,
+      default: false,
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("nhanSuSoan", nhanSuSoanSchema);

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const nhapHangController = require("../../controllers/nhaphang/nhaphang.controller");
 const qcDacThuController = require("../../controllers/nhaphang/qcdacthu.controller");
+const asnController = require("../../controllers/nhaphang/asn.controller");
 
 // ─────────────────────────────────────────────
 // NHẬP HÀNG
@@ -32,5 +33,21 @@ router.delete("/qcdacthu/:id", qcDacThuController.remove);
 router.post("/qcdacthu/import-many", qcDacThuController.importMany);
 router.put("/qcdacthu/update-many", qcDacThuController.updateMany);
 router.delete("/qcdacthu/delete-many", qcDacThuController.deleteMany);
+
+// ─────────────────────────────────────────────
+// ASN
+// ─────────────────────────────────────────────
+// CRUD cơ bản
+router.post("/asn", asnController.create);
+router.get("/asn", asnController.getAll);
+router.get("/asn/:id", asnController.getOne);
+router.put("/asn/:id", asnController.update);
+router.delete("/asn/:id", asnController.remove);
+
+// Bulk operations
+router.post("/asn/import-many", asnController.importMany);
+router.post("/asn/import-update", asnController.importUpdate);
+router.put("/asn/update-many", asnController.updateMany);
+router.delete("/asn/delete-many", asnController.deleteMany);
 
 module.exports = router;
