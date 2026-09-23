@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 
 const baoBiSchema = new mongoose.Schema(
   {
+     so_phieu: {
+      type: String,
+      trim: true,
+    },
     ton_nhap_dau_ki: {
       type: Number,
       trim: true,
@@ -44,8 +48,16 @@ const baoBiSchema = new mongoose.Schema(
       type: Date,
       trim: true,
     },
+     ghi_chu: {
+      type: String,
+      trim: true,
+    },
     tg_nhap: {
       type: Date,
+      trim: true,
+    },
+      ten_nguoi_xac_nhan: {
+      type: String,
       trim: true,
     },
     tg_xuat: {

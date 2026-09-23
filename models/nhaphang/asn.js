@@ -11,7 +11,7 @@ const ASNSchema = new mongoose.Schema({
     kien_con_lai: { type: String },
     ten_nganh_hang: { type: String },
     kho:{ type: String },
-    ngay_import: { type: Date },
+    ngay_import: { type: Date },  
 });
 
 module.exports = mongoose.model("ASN", ASNSchema);

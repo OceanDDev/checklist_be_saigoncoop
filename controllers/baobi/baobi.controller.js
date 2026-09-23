@@ -13,6 +13,7 @@ exports.getAllBaoBi = async (req, res) => {
       ten_ch,
       ten_ncc,
       so_hd,
+      so_phieu, // MỚI
       tu_ngay_hd,
       den_ngay_hd,
       tu_ngay_nhap,
@@ -37,6 +38,7 @@ exports.getAllBaoBi = async (req, res) => {
     if (ten_ch) filter.ten_ch = { $regex: ten_ch, $options: "i" };
     if (ten_ncc) filter.ten_ncc = { $regex: ten_ncc, $options: "i" };
     if (so_hd) filter.so_hd = Number(so_hd);
+    if (so_phieu) filter.so_phieu = { $regex: so_phieu, $options: "i" }; // MỚI
 
     if (tu_ngay_hd || den_ngay_hd) {
       filter.ngay_hd = {};
@@ -251,6 +253,10 @@ exports.createBaoBi = async (req, res) => {
       so_hd,
       ngay_hd,
       tg_nhap,
+      so_phieu, // MỚI
+      ghi_chu, // MỚI
+        ten_nguoi_xac_nhan, // MỚI
+
     } = req.body;
 
     if (!sku) return res.status(400).json({ error: "Thiếu SKU bao bì" });
@@ -280,6 +286,10 @@ exports.createBaoBi = async (req, res) => {
       so_hd,
       ngay_hd,
       tg_nhap,
+      so_phieu, // MỚI
+      ghi_chu, // MỚI
+        ten_nguoi_xac_nhan, // MỚI
+
     });
 
     const saved = await newBaoBi.save();
@@ -297,7 +307,17 @@ exports.createBaoBi = async (req, res) => {
 // ==========================
 exports.createXuatBaoBi = async (req, res) => {
   try {
-    const { sku, ma_ch, ten_ch, luong_xuat, tg_xuat } = req.body;
+    const {
+      sku,
+      ma_ch,
+      ten_ch,
+      luong_xuat,
+      tg_xuat,
+      so_phieu, // MỚI
+      ghi_chu, // MỚI
+        ten_nguoi_xac_nhan, // MỚI
+
+    } = req.body;
 
     if (!sku) return res.status(400).json({ error: "Thiếu SKU bao bì" });
     if (!ma_ch) return res.status(400).json({ error: "Thiếu mã cửa hàng" });
@@ -348,6 +368,10 @@ exports.createXuatBaoBi = async (req, res) => {
       luong_xuat: soLuongXuat,
       ton_xuat_trong_ki: tonXuatMoi,
       tg_xuat: tg_xuat || new Date(),
+      so_phieu, // MỚI
+      ghi_chu, // MỚI
+            ten_nguoi_xac_nhan, // ← đã lấy từ req.body
+
     });
 
     const saved = await newXuat.save();
@@ -397,6 +421,7 @@ exports.getBaoBiByMaCH = async (req, res) => {
 // Sửa 1 bản ghi — SỬA THÔ, không tự tính lại lũy kế các bản ghi sau
 // ⚠️ Nếu sửa luong_nhap/luong_xuat của 1 bản ghi cũ, các bản ghi tạo SAU nó
 // theo cùng SKU sẽ KHÔNG được tự động cập nhật lại tồn lũy kế.
+// (req.body đã tự chứa so_phieu/ghi_chu nếu client gửi lên, không cần sửa gì thêm)
 // ==========================
 exports.updateBaoBi = async (req, res) => {
   try {
@@ -492,6 +517,10 @@ exports.createManyBaoBi = async (req, res) => {
           so_hd: item.so_hd,
           ngay_hd: item.ngay_hd,
           tg_nhap: item.tg_nhap,
+          so_phieu: item.so_phieu, // MỚI
+          ghi_chu: item.ghi_chu, // MỚI
+            ten_nguoi_xac_nhan: item.ten_nguoi_xac_nhan, // MỚI
+
         });
       } else if (isXuat) {
         const soLuongXuat = Number(item.luong_xuat) || 0;
@@ -551,6 +580,10 @@ exports.createManyBaoBi = async (req, res) => {
           luong_xuat: soLuongXuat,
           ton_xuat_trong_ki: tonXuatMoi,
           tg_xuat: item.tg_xuat || new Date(),
+          so_phieu: item.so_phieu, // MỚI
+          ghi_chu: item.ghi_chu, // MỚI
+            ten_nguoi_xac_nhan: item.ten_nguoi_xac_nhan, // MỚI
+
         });
       } else {
         errors.push({

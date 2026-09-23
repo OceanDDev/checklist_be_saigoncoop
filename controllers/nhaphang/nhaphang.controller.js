@@ -1,8 +1,5 @@
 const NhapHang = require("../../models/nhaphang/nhaphang");
 
-// ─────────────────────────────────────────────
-// CREATE (tạo 1 bản ghi)
-// ─────────────────────────────────────────────
 exports.create = async (req, res) => {
   try {
     const {
@@ -15,6 +12,9 @@ exports.create = async (req, res) => {
       lpn,
       trang_thai,
       loai_hinh,
+      so_phieu_nhap,
+      loai_hinh_nhap,
+      so_po,
       nhan_vien_nhap,
       nhan_vien_put,
       nhan_vien_let,
@@ -22,7 +22,9 @@ exports.create = async (req, res) => {
       ngay_nhan_let,
       ngay_gio_tao_let,
       ngay_gio_hoan_thanh,
-    } = req.body;
+      ngay_san_xuat,
+      ngay_het_han,
+    } = req.body; // req.body, không phải req.query
 
     const newItem = new NhapHang({
       sku,
@@ -34,6 +36,9 @@ exports.create = async (req, res) => {
       lpn,
       trang_thai,
       loai_hinh,
+      so_phieu_nhap,
+      loai_hinh_nhap,
+      so_po,
       nhan_vien_nhap,
       nhan_vien_put,
       nhan_vien_let,
@@ -41,9 +46,10 @@ exports.create = async (req, res) => {
       ngay_nhan_let,
       ngay_gio_tao_let,
       ngay_gio_hoan_thanh,
+      ngay_san_xuat, // THÊM
+      ngay_het_han, // THÊM
       ngay_import: new Date(),
     });
-
     const saved = await newItem.save();
     return res.status(201).json({ message: "Tạo thành công", data: saved });
   } catch (error) {
@@ -71,6 +77,9 @@ exports.getAll = async (req, res) => {
       lpn,
       trang_thai,
       loai_hinh,
+      so_phieu_nhap,
+      loai_hinh_nhap,
+      so_po,
       nhan_vien_nhap,
       nhan_vien_put,
       nhan_vien_let,
@@ -104,6 +113,9 @@ exports.getAll = async (req, res) => {
     textFilter("nhan_vien_nhap", nhan_vien_nhap);
     textFilter("nhan_vien_put", nhan_vien_put);
     textFilter("nhan_vien_let", nhan_vien_let);
+    textFilter("so_phieu_nhap", so_phieu_nhap);
+    textFilter("loai_hinh_nhap", loai_hinh_nhap);
+    textFilter("so_po", so_po);
 
     // Số -> match chính xác (nếu value không phải số hợp lệ thì bỏ qua)
     const numberFilter = (field, value) => {
@@ -364,36 +376,33 @@ exports.importMany = async (req, res) => {
     }
 
     const now = new Date();
-    const docs = validItems.map((item) => ({
-      sku: item.sku,
-      name: item.name,
-      vi_tri: item.vi_tri,
-      kien: Number(item.kien),
-      kho: Number(item.kho),
-      tong_sl:
-        item.tong_sl !== undefined && item.tong_sl !== ""
-          ? Number(item.tong_sl)
-          : undefined,
-      lpn: item.lpn,
-      trang_thai: item.trang_thai || "Chưa xử lý",
-      loai_hinh: item.loai_hinh || "Nhập",
-      nhan_vien_nhap: item.nhan_vien_nhap || undefined,
-      nhan_vien_put: item.nhan_vien_put || undefined,
-      nhan_vien_let: item.nhan_vien_let || undefined,
-      ngay_nhap_kho: item.ngay_nhap_kho
-        ? new Date(item.ngay_nhap_kho)
-        : undefined,
-      ngay_nhan_let: item.ngay_nhan_let
-        ? new Date(item.ngay_nhan_let)
-        : undefined,
-      ngay_gio_tao_let: item.ngay_gio_tao_let
-        ? new Date(item.ngay_gio_tao_let)
-        : undefined,
-      ngay_gio_hoan_thanh: item.ngay_gio_hoan_thanh
-        ? new Date(item.ngay_gio_hoan_thanh)
-        : undefined,
-      ngay_import: now,
-    }));
+  const docs = validItems.map((item) => ({
+  sku: item.sku,
+  name: item.name,
+  vi_tri: item.vi_tri,
+  kien: Number(item.kien),
+  kho: Number(item.kho),
+  tong_sl:
+    item.tong_sl !== undefined && item.tong_sl !== ""
+      ? Number(item.tong_sl)
+      : undefined,
+  lpn: item.lpn,
+  trang_thai: item.trang_thai || "Chưa xử lý",
+  loai_hinh: item.loai_hinh || "Nhập",
+  so_phieu_nhap: item.so_phieu_nhap || undefined,
+  loai_hinh_nhap: item.loai_hinh_nhap || undefined,
+  so_po: item.so_po || undefined,
+  nhan_vien_nhap: item.nhan_vien_nhap || undefined,
+  nhan_vien_put: item.nhan_vien_put || undefined,
+  nhan_vien_let: item.nhan_vien_let || undefined,
+  ngay_nhap_kho: item.ngay_nhap_kho ? new Date(item.ngay_nhap_kho) : undefined,
+  ngay_san_xuat: item.ngay_san_xuat ? new Date(item.ngay_san_xuat) : undefined,   // THÊM
+  ngay_het_han: item.ngay_het_han ? new Date(item.ngay_het_han) : undefined,       // THÊM
+  ngay_nhan_let: item.ngay_nhan_let ? new Date(item.ngay_nhan_let) : undefined,
+  ngay_gio_tao_let: item.ngay_gio_tao_let ? new Date(item.ngay_gio_tao_let) : undefined,
+  ngay_gio_hoan_thanh: item.ngay_gio_hoan_thanh ? new Date(item.ngay_gio_hoan_thanh) : undefined,
+  ngay_import: now,
+}));
 
     // "Let" -> 1 LPN có thể được châm hàng nhiều lần -> KHÔNG upsert,
     // luôn insert như bản ghi mới (kể cả trùng y hệt tổ hợp khóa với 1 bản
@@ -429,27 +438,36 @@ exports.importMany = async (req, res) => {
       }
     }
 
-    // Nhập/Put -> upsert theo tổ hợp đầy đủ (lpn + loai_hinh + vi_tri +
-    // sku + kho): đúng khớp cả tổ hợp -> update lại bản ghi cũ; khác đi
-    // (vd cùng LPN nhưng khác vi_tri) -> insert thành dòng mới.
+    // Nhập/Put -> khớp đủ 10 field khóa => chỉ update Kiện/Tổng SL/Trạng thái
+    // (+ ngay_import). Khác 1 field bất kỳ trong khóa => insert dòng mới với
+    // đầy đủ dữ liệu (qua $setOnInsert).
     if (nonLetItems.length > 0) {
-      const bulkOps = nonLetItems.map((doc) => ({
-        updateOne: {
-          filter: {
-            lpn: doc.lpn,
-            loai_hinh: doc.loai_hinh,
-            vi_tri: doc.vi_tri,
-            sku: doc.sku,
-            kho: doc.kho,
+      const bulkOps = nonLetItems.map((doc) => {
+        const { kien, tong_sl, trang_thai, ngay_import, ...restFields } = doc;
+        return {
+          updateOne: {
+            filter: {
+              lpn: doc.lpn,
+              kho: doc.kho,
+              sku: doc.sku,
+              name: doc.name,
+              so_phieu_nhap: doc.so_phieu_nhap,
+              vi_tri: doc.vi_tri,
+              loai_hinh_nhap: doc.loai_hinh_nhap,
+              so_po: doc.so_po,
+              ngay_san_xuat: doc.ngay_san_xuat,
+              ngay_het_han: doc.ngay_het_han,
+            },
+            update: {
+              $set: { kien, tong_sl, trang_thai, ngay_import },
+              $setOnInsert: restFields,
+            },
+            upsert: true,
           },
-          update: { $set: doc },
-          upsert: true,
-        },
-      }));
-
-      const bulkResult = await NhapHang.bulkWrite(bulkOps, {
-        ordered: false,
+        };
       });
+
+      const bulkResult = await NhapHang.bulkWrite(bulkOps, { ordered: false });
       upsertedCount += bulkResult.upsertedCount || 0;
       modifiedCount += bulkResult.modifiedCount || 0;
     }
