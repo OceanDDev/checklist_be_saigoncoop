@@ -6,28 +6,28 @@ const ASN = require("../../models/nhaphang/asn"); // sửa lại đường dẫn
 exports.create = async (req, res) => {
   try {
     const {
-      asn,
       po,
       ngay_asn,
+      so_booking,
       ma_ncc,
       ten_ncc,
+      so_luong_sku,
+      so_kien,
       loai_hinh,
-      kien_ke_hoach,
-      kien_con_lai,
       ten_nganh_hang,
       kho,
       ngay_import,
     } = req.body;
 
     const newItem = new ASN({
-      asn,
       po,
       ngay_asn,
+      so_booking,
       ma_ncc,
       ten_ncc,
+      so_luong_sku,
+      so_kien,
       loai_hinh,
-      kien_ke_hoach,
-      kien_con_lai,
       ten_nganh_hang,
       kho,
       ngay_import,
@@ -44,8 +44,8 @@ exports.create = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────
-// IMPORT MANY (chỉ insert, bỏ qua dòng thiếu asn)
-// Body: { items: [ { asn, po, ... }, ... ] }
+// IMPORT MANY (chỉ insert, giữ đủ mọi dòng kể cả thiếu field)
+// Body: { items: [ { so_booking, po, ... }, ... ] }
 // ─────────────────────────────────────────────
 exports.importMany = async (req, res) => {
   try {
@@ -57,14 +57,13 @@ exports.importMany = async (req, res) => {
         .json({ message: "Danh sách items không hợp lệ hoặc rỗng" });
     }
 
-    // Lọc bỏ những dòng thiếu asn (tránh lỗi validate hàng loạt)
-    const validItems = items.filter((item) => item && item.asn);
+    const validItems = items.filter((item) => item && typeof item === "object");
     const invalidCount = items.length - validItems.length;
 
     if (validItems.length === 0) {
       return res
         .status(400)
-        .json({ message: "Không có bản ghi hợp lệ để import (thiếu asn)" });
+        .json({ message: "Không có bản ghi hợp lệ để import" });
     }
 
     const result = await ASN.insertMany(validItems, { ordered: false });
@@ -101,10 +100,17 @@ exports.importMany = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────
-// IMPORT + CẬP NHẬT (upsert theo cặp asn + po)
-// Nếu bản ghi (asn, po) đã tồn tại -> cập nhật các field khác
-// Nếu chưa tồn tại -> tạo mới
-// Body: { items: [ { asn, po, ... }, ... ] }
+// IMPORT + CẬP NHẬT
+//
+// Dữ liệu phải lấy ĐỦ — không bỏ qua bản ghi nào, kể cả thiếu field.
+//
+// Khóa để coi 1 dòng là "trùng" (và cập nhật lại): phải khớp ĐỦ CẢ 3
+// field ten_ncc + po + so_booking (+ cùng kho, để không lẫn dữ liệu
+// giữa các kho khi import nhiều kho một lượt). Thiếu 1 trong 3 field đó
+// -> không đủ điều kiện để match, luôn tạo bản ghi mới (insert), tránh
+// gộp nhầm các dòng không thật sự trùng nhau.
+//
+// Body: { items: [ { ten_ncc, po, so_booking, ... }, ... ] }
 // ─────────────────────────────────────────────
 exports.importUpdate = async (req, res) => {
   try {
@@ -116,52 +122,62 @@ exports.importUpdate = async (req, res) => {
         .json({ message: "Danh sách items không hợp lệ hoặc rỗng" });
     }
 
-    const validItems = items.filter((item) => item && item.asn);
-    const invalidCount = items.length - validItems.length;
+    // Có đủ cả 3 field định danh (khác rỗng/null) thì mới match để update,
+    // ngược lại luôn insert mới -> không đánh rớt dữ liệu.
+    const hasFullKey = (item) =>
+      !!(
+        item &&
+        item.ten_ncc &&
+        item.po !== undefined &&
+        item.po !== null &&
+        item.po !== "" &&
+        item.so_booking
+      );
 
-    if (validItems.length === 0) {
-      return res
-        .status(400)
-        .json({ message: "Không có bản ghi hợp lệ để import (thiếu asn)" });
-    }
-
-    const operations = validItems.map((item) => ({
-      updateOne: {
-        filter: { asn: item.asn, po: item.po, kho: item.kho }, // khóa xác định 1 bản ghi duy nhất
-        update: { $set: item },
-        upsert: true,
-      },
-    }));
+    const operations = items.map((item) =>
+      hasFullKey(item)
+        ? {
+            updateOne: {
+              filter: {
+                ten_ncc: item.ten_ncc,
+                po: item.po,
+                so_booking: item.so_booking,
+                kho: item.kho,
+              },
+              update: { $set: item },
+              upsert: true,
+            },
+          }
+        : { insertOne: { document: item } },
+    );
 
     const result = await ASN.bulkWrite(operations, { ordered: false });
 
     return res.status(200).json({
       message: "Import & cập nhật thành công",
+      insertedCount: result.insertedCount,
       matchedCount: result.matchedCount,
       modifiedCount: result.modifiedCount,
       upsertedCount: result.upsertedCount,
-      skippedInvalid: invalidCount,
     });
   } catch (error) {
     console.error("Lỗi importUpdate ASN:", error);
-    return res
-      .status(500)
-      .json({
-        message: "Lỗi server khi import & cập nhật",
-        error: error.message,
-      });
+    return res.status(500).json({
+      message: "Lỗi server khi import & cập nhật",
+      error: error.message,
+    });
   }
 };
 
 // ─────────────────────────────────────────────
-// GET ALL (phân trang + search theo asn/po/ten_ncc)
+// GET ALL (phân trang + search theo so_booking/po/ten_ncc)
 // ─────────────────────────────────────────────
 exports.getAll = async (req, res) => {
   try {
     const {
       page = 1,
       limit = 20,
-      asn,
+      so_booking,
       po,
       ten_ncc,
       kho,
@@ -173,7 +189,7 @@ exports.getAll = async (req, res) => {
     } = req.query;
 
     const query = {};
-    if (asn) query.asn = { $regex: asn, $options: "i" };
+    if (so_booking) query.so_booking = { $regex: so_booking, $options: "i" };
     if (po) query.po = { $regex: po, $options: "i" };
     if (ten_ncc) query.ten_ncc = { $regex: ten_ncc, $options: "i" };
     if (kho) query.kho = { $regex: kho, $options: "i" };
@@ -335,12 +351,10 @@ exports.updateMany = async (req, res) => {
     });
   } catch (error) {
     console.error("Lỗi updateMany ASN:", error);
-    return res
-      .status(500)
-      .json({
-        message: "Lỗi server khi cập nhật hàng loạt",
-        error: error.message,
-      });
+    return res.status(500).json({
+      message: "Lỗi server khi cập nhật hàng loạt",
+      error: error.message,
+    });
   }
 };
 
