@@ -1,5 +1,50 @@
 const ASN = require("../../models/nhaphang/asn"); // sửa lại đường dẫn cho đúng project
+const buildQuery = (f = {}) => {
+  const {
+    so_booking,
+    po,
+    ten_ncc,
+    kho,
+    loai_hinh,
+    ma_ncc,
+    ten_nganh_hang,
+    ngay_asn_from,
+    ngay_asn_to,
+    ngay_import_from,
+    ngay_import_to,
+  } = f;
 
+  const query = {};
+  if (so_booking) query.so_booking = { $regex: so_booking, $options: "i" };
+  if (po) query.po = { $regex: po, $options: "i" };
+  if (ten_ncc) query.ten_ncc = { $regex: ten_ncc, $options: "i" };
+  if (ten_nganh_hang)
+    query.ten_nganh_hang = { $regex: ten_nganh_hang, $options: "i" };
+  if (kho) query.kho = { $regex: kho, $options: "i" };
+  if (loai_hinh) query.loai_hinh = loai_hinh;
+  if (ma_ncc !== undefined && ma_ncc !== "" && !isNaN(Number(ma_ncc)))
+    query.ma_ncc = Number(ma_ncc);
+
+  const dayRange = (from, to) => {
+    const r = {};
+    if (from) {
+      const [y, m, d] = from.split("-").map(Number);
+      r.$gte = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+    }
+    if (to) {
+      const [y, m, d] = to.split("-").map(Number);
+      r.$lte = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999));
+    }
+    return r;
+  };
+
+  if (ngay_asn_from || ngay_asn_to)
+    query.ngay_asn = dayRange(ngay_asn_from, ngay_asn_to);
+  if (ngay_import_from || ngay_import_to)
+    query.ngay_import = dayRange(ngay_import_from, ngay_import_to);
+
+  return query;
+};
 // ─────────────────────────────────────────────
 // CREATE
 // ─────────────────────────────────────────────
@@ -122,8 +167,6 @@ exports.importUpdate = async (req, res) => {
         .json({ message: "Danh sách items không hợp lệ hoặc rỗng" });
     }
 
-    // Có đủ cả 3 field định danh (khác rỗng/null) thì mới match để update,
-    // ngược lại luôn insert mới -> không đánh rớt dữ liệu.
     const hasFullKey = (item) =>
       !!(
         item &&
@@ -133,6 +176,45 @@ exports.importUpdate = async (req, res) => {
         item.po !== "" &&
         item.so_booking
       );
+
+    const keyOf = (i) => [i.ten_ncc, i.po, i.so_booking, i.kho].join("|");
+    const keyed = items.filter(hasFullKey);
+
+    // So với dữ liệu cũ TRƯỚC khi ghi để biết dòng nào bị đổi ngày / số kiện
+    const changes = [];
+    if (keyed.length) {
+      const existing = await ASN.find({
+        $or: keyed.map((i) => ({
+          ten_ncc: i.ten_ncc,
+          po: i.po,
+          so_booking: i.so_booking,
+          kho: i.kho,
+        })),
+      })
+        .select("ten_ncc po so_booking kho ngay_asn so_kien")
+        .lean();
+
+      const oldMap = new Map(existing.map((d) => [keyOf(d), d]));
+      keyed.forEach((i) => {
+        const old = oldMap.get(keyOf(i));
+        if (!old) return;
+        const dateChanged =
+          i.ngay_asn !== undefined &&
+          new Date(old.ngay_asn).getTime() !== new Date(i.ngay_asn).getTime();
+        const kienChanged =
+          i.so_kien !== undefined && String(old.so_kien) !== String(i.so_kien);
+        if (dateChanged || kienChanged) {
+          changes.push({
+            po: i.po,
+            so_booking: i.so_booking,
+            ngay_asn_cu: old.ngay_asn,
+            ngay_asn_moi: i.ngay_asn,
+            so_kien_cu: old.so_kien,
+            so_kien_moi: i.so_kien,
+          });
+        }
+      });
+    }
 
     const operations = items.map((item) =>
       hasFullKey(item)
@@ -159,6 +241,8 @@ exports.importUpdate = async (req, res) => {
       matchedCount: result.matchedCount,
       modifiedCount: result.modifiedCount,
       upsertedCount: result.upsertedCount,
+      changedCount: changes.length,
+      changes,
     });
   } catch (error) {
     console.error("Lỗi importUpdate ASN:", error);
@@ -168,61 +252,13 @@ exports.importUpdate = async (req, res) => {
     });
   }
 };
-
 // ─────────────────────────────────────────────
-// GET ALL (phân trang + search theo so_booking/po/ten_ncc)
+// GET ALL (phân trang + lọc theo từng cột, dùng chung buildQuery)
 // ─────────────────────────────────────────────
 exports.getAll = async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 20,
-      so_booking,
-      po,
-      ten_ncc,
-      kho,
-      loai_hinh,
-      ngay_asn_from,
-      ngay_asn_to,
-      ngay_import_from,
-      ngay_import_to,
-    } = req.query;
-
-    const query = {};
-    if (so_booking) query.so_booking = { $regex: so_booking, $options: "i" };
-    if (po) query.po = { $regex: po, $options: "i" };
-    if (ten_ncc) query.ten_ncc = { $regex: ten_ncc, $options: "i" };
-    if (kho) query.kho = { $regex: kho, $options: "i" };
-    if (loai_hinh) query.loai_hinh = loai_hinh;
-
-    // Lọc theo khoảng ngày ASN — nhận "YYYY-MM-DD" từ input type=date,
-    // quy đổi về mốc đầu ngày / cuối ngày theo UTC để không lệch timezone
-    if (ngay_asn_from || ngay_asn_to) {
-      query.ngay_asn = {};
-      if (ngay_asn_from) {
-        const [y, m, d] = ngay_asn_from.split("-").map(Number);
-        query.ngay_asn.$gte = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
-      }
-      if (ngay_asn_to) {
-        const [y, m, d] = ngay_asn_to.split("-").map(Number);
-        query.ngay_asn.$lte = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999));
-      }
-    }
-
-    // Lọc theo khoảng ngày import — cùng cách quy đổi như ngày ASN
-    if (ngay_import_from || ngay_import_to) {
-      query.ngay_import = {};
-      if (ngay_import_from) {
-        const [y, m, d] = ngay_import_from.split("-").map(Number);
-        query.ngay_import.$gte = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
-      }
-      if (ngay_import_to) {
-        const [y, m, d] = ngay_import_to.split("-").map(Number);
-        query.ngay_import.$lte = new Date(
-          Date.UTC(y, m - 1, d, 23, 59, 59, 999),
-        );
-      }
-    }
+    const { page = 1, limit = 20, ...filters } = req.query;
+    const query = buildQuery(filters);
 
     const skip = (Number(page) - 1) * Number(limit);
 
@@ -383,5 +419,33 @@ exports.deleteMany = async (req, res) => {
     return res
       .status(500)
       .json({ message: "Lỗi server khi xóa hàng loạt", error: error.message });
+  }
+};
+// ─────────────────────────────────────────────
+// DELETE BY FILTER (xóa theo đúng bộ lọc đang áp trên bảng)
+// Body: { filters: { kho, ngay_asn_from, ngay_asn_to, ... } }
+// Bắt buộc có ít nhất 1 bộ lọc để tránh lỡ tay xóa sạch bảng.
+// ─────────────────────────────────────────────
+exports.deleteByFilter = async (req, res) => {
+  try {
+    const { filters = {} } = req.body;
+    const query = buildQuery(filters);
+
+    if (Object.keys(query).length === 0) {
+      return res
+        .status(400)
+        .json({ message: "Cần có ít nhất 1 bộ lọc để xóa theo bộ lọc" });
+    }
+
+    const result = await ASN.deleteMany(query);
+    return res.status(200).json({
+      message: `Đã xóa ${result.deletedCount} bản ghi`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    console.error("Lỗi deleteByFilter ASN:", error);
+    return res
+      .status(500)
+      .json({ message: "Lỗi server khi xóa", error: error.message });
   }
 };

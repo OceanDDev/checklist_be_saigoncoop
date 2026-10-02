@@ -94,6 +94,7 @@ const TonKhoRoutes = require("./routes/tonhko/tonkho.routes.js");
 const NhapHangRoutes = require("./routes/nhaphang/nhaphang.routes.js");
 const BaoTaiRoutes = require("./routes/baotai/baotai.routes.js");
 const BaoBiRoutes = require("./routes/baobi/baobi.routes.js");
+const XuatHangRoutes = require("./routes/xuathang/xuathang.routes.js");
 
 app.use("/api/saigoncoop", userRoutes);
 app.use("/api/saigoncoop", checklistRoutes);
@@ -123,6 +124,7 @@ app.use("/api/saigoncoop", TonKhoRoutes);
 app.use("/api/saigoncoop", NhapHangRoutes);
 app.use("/api/saigoncoop", BaoTaiRoutes);
 app.use("/api/saigoncoop", BaoBiRoutes);
+app.use("/api/saigoncoop", XuatHangRoutes);
 
 
 app.use((err, req, res, next) => {

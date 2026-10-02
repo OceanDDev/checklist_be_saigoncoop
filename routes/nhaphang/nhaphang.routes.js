@@ -7,17 +7,19 @@ const asnController = require("../../controllers/nhaphang/asn.controller");
 // ─────────────────────────────────────────────
 // NHẬP HÀNG
 // ─────────────────────────────────────────────
+
+// Bulk operations
+router.post("/nhaphang/import-many", nhapHangController.importMany);
+router.post("/nhaphang/delete-many", nhapHangController.deleteMany); // đổi delete -> post
+router.post("/nhaphang/delete-by-filter", nhapHangController.deleteByFilter);
+router.put("/nhaphang/update-many", nhapHangController.updateMany);
+
 // CRUD cơ bản
 router.post("/nhaphang", nhapHangController.create);
 router.get("/nhaphang", nhapHangController.getAll);
 router.get("/nhaphang/:id", nhapHangController.getOne);
 router.put("/nhaphang/:id", nhapHangController.update);
 router.delete("/nhaphang/:id", nhapHangController.remove);
-
-// Bulk operations
-router.post("/nhaphang/import-many", nhapHangController.importMany);
-router.put("/nhaphang/update-many", nhapHangController.updateMany);
-router.delete("/nhaphang/delete-many", nhapHangController.deleteMany);
 
 // ─────────────────────────────────────────────
 // QC ĐẶC THÙ
@@ -49,5 +51,5 @@ router.post("/asn/import-many", asnController.importMany);
 router.post("/asn/import-update", asnController.importUpdate);
 router.put("/asn/update-many", asnController.updateMany);
 router.delete("/asn/delete-many", asnController.deleteMany);
-
+router.post("/asn/delete-by-filter", asnController.deleteByFilter);
 module.exports = router;
