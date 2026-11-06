@@ -56,6 +56,8 @@ const getByIdTonKho = async (req, res) => {
 
 // [POST] Chốt kỳ: tự động aggregate từ TrangThietBi (theo ky) group theo (ma_ch, loai_ttb),
 // lấy ton_cuoi_ky của kỳ trước làm ton_dau_ky, tính ton_cuoi_ky mới, rồi upsert vào TonKhoCuaHang.
+// Các cặp (ma_ch, loai_ttb) còn tồn từ kỳ trước nhưng không phát sinh trong kỳ này
+// cũng được chuyển tồn sang (giao = 0, trả = 0).
 // Body: { ky: "2026-06" }
 const chotKyTheoCuaHang = async (req, res) => {
   try {
@@ -81,14 +83,7 @@ const chotKyTheoCuaHang = async (req, res) => {
       },
     ]);
 
-    if (aggregated.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Không có dữ liệu giao/trả nào trong kỳ ${ky} để chốt`,
-      });
-    }
-
-    // 2. Lấy tồn cuối kỳ trước (làm tồn đầu kỳ này) cho tất cả cặp (ma_ch, loai_ttb) liên quan
+    // 2. Lấy tồn cuối kỳ trước (làm tồn đầu kỳ này) cho tất cả cặp (ma_ch, loai_ttb)
     const kyTruocDo = kyTruoc(ky);
     const tonKyTruoc = await TonKhoCuaHang.find({ ky: kyTruocDo });
 
@@ -97,14 +92,19 @@ const chotKyTheoCuaHang = async (req, res) => {
     );
 
     // 3. Build bulk upsert cho kỳ hiện tại
-    const bulkOps = aggregated.map((g) => {
+    const bulkOps = [];
+    const daXuLy = new Set();
+
+    // 3a. Các cặp có phát sinh giao/trả trong kỳ
+    for (const g of aggregated) {
       const ma_ch = g._id.ma_ch;
       const loai_ttb = g._id.loai_ttb;
       const key = `${ma_ch}|${loai_ttb}`;
       const ton_dau_ky = tonKyTruocMap.get(key) || 0;
       const ton_cuoi_ky = ton_dau_ky + g.tong_giao - g.tong_tra;
 
-      return {
+      daXuLy.add(key);
+      bulkOps.push({
         updateOne: {
           filter: { ma_ch, loai_ttb, ky },
           update: {
@@ -118,8 +118,40 @@ const chotKyTheoCuaHang = async (req, res) => {
           },
           upsert: true,
         },
-      };
-    });
+      });
+    }
+
+    // 3b. Các cặp còn tồn từ kỳ trước nhưng KHÔNG phát sinh trong kỳ -> chuyển tồn sang
+    for (const t of tonKyTruoc) {
+      const key = `${t.ma_ch}|${t.loai_ttb}`;
+      if (daXuLy.has(key)) continue;
+
+      const ton = t.ton_cuoi_ky || 0;
+      if (ton === 0) continue; // tồn 0 thì không cần tạo dòng
+
+      bulkOps.push({
+        updateOne: {
+          filter: { ma_ch: t.ma_ch, loai_ttb: t.loai_ttb, ky },
+          update: {
+            $set: {
+              ten_ch: t.ten_ch,
+              ton_dau_ky: ton,
+              tong_giao: 0,
+              tong_tra: 0,
+              ton_cuoi_ky: ton,
+            },
+          },
+          upsert: true,
+        },
+      });
+    }
+
+    if (bulkOps.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Không có dữ liệu giao/trả hay tồn kỳ trước nào để chốt kỳ ${ky}`,
+      });
+    }
 
     const result = await TonKhoCuaHang.bulkWrite(bulkOps, { ordered: false });
 

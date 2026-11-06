@@ -1,4 +1,5 @@
 // controllers/phieusoan/nhanSuSoan.controller.js
+const dayjs = require("dayjs");
 const NhanSuSoan = require("../../models/phieusoan/nhansusoan");
 const NhanVien = require("../../models/chamcong/nhanvien");
 const DataCH = require("../../models/phieusoan/dataCH");
@@ -1289,10 +1290,138 @@ const getKienTheoSoSoda = async (req, res) => {
   }
 };
 
+
+// ─── API LẤY DỮ LIỆU BIỂU ĐỒ TIMELINE (14 ngày, 7 tuần, 12 tháng) ─────────────
+// Thay vì để Frontend fetch 50,000 - 100,000 bản ghi chi tiết (gây tràn limit,
+// mất dữ liệu tháng 9 và nghẽn mạng), Backend sẽ query và gom nhóm trực tiếp.
+const getOrderTimeline = async (req, res) => {
+  try {
+    const now = dayjs();
+    // 12 tháng gần nhất (tính từ đầu tháng 11 tháng trước)
+    const start12Months = now.subtract(11, "month").startOf("month").toDate();
+    const endNow = now.endOf("day").toDate();
+
+    // Lấy các trường cần thiết, không giới hạn limit (chỉ lấy field tối thiểu để siêu nhẹ)
+    const docs = await NhanSuSoan.find(
+      {
+        $or: [
+          { tgImport: { $gte: start12Months, $lte: endNow } },
+          { tgImport: { $exists: false }, createdAt: { $gte: start12Months, $lte: endNow } },
+        ],
+      },
+      { soDonHang: 1, tgImport: 1, createdAt: 1, trangThai: 1, kien: 1 }
+    ).lean();
+
+    const classifyChain = (soDonHang) => {
+      const code = (soDonHang || "").toString().trim().toUpperCase();
+      if (code.startsWith("SO")) return "CS";
+      if (code.startsWith("TO")) return "CF";
+      return "Khác";
+    };
+
+    // 1. Ngày: 14 ngày gần nhất
+    const dayBuckets = Array.from({ length: 14 }, (_, i) => {
+      const d = now.subtract(13 - i, "day");
+      return {
+        label: d.format("DD/MM"),
+        startMs: d.startOf("day").valueOf(),
+        endMs: d.endOf("day").valueOf(),
+        CF: { donHang: 0, kien: 0 },
+        CS: { donHang: 0, kien: 0 },
+      };
+    });
+
+    // 2. Tuần: 7 tuần gần nhất
+    const weekBuckets = Array.from({ length: 7 }, (_, i) => {
+      const end = now.subtract((6 - i) * 7, "day").endOf("day");
+      const start = end.subtract(6, "day").startOf("day");
+      return {
+        label: `${start.format("DD/MM")}-${end.format("DD/MM")}`,
+        startMs: start.valueOf(),
+        endMs: end.valueOf(),
+        CF: { donHang: 0, kien: 0 },
+        CS: { donHang: 0, kien: 0 },
+      };
+    });
+
+    // 3. Tháng: 12 tháng gần nhất
+    const monthBuckets = Array.from({ length: 12 }, (_, i) => {
+      const m = now.subtract(11 - i, "month");
+      return {
+        label: m.format("MM/YYYY"),
+        startMs: m.startOf("month").valueOf(),
+        endMs: m.endOf("month").valueOf(),
+        CF: { donHang: 0, kien: 0 },
+        CS: { donHang: 0, kien: 0 },
+      };
+    });
+
+    // Gom dữ liệu vào các bucket
+    docs.forEach((item) => {
+      const dateVal = item.tgImport || item.createdAt;
+      if (!dateVal) return;
+      const t = dayjs(dateVal).valueOf();
+
+      const chain = classifyChain(item.soDonHang);
+      if (chain !== "CF" && chain !== "CS") return;
+
+      const isDone = item.trangThai === "Hoàn thành";
+      const kien = item.kien || 0;
+
+      // Check ngày
+      for (const b of dayBuckets) {
+        if (t >= b.startMs && t <= b.endMs) {
+          b[chain].donHang += 1;
+          if (isDone) b[chain].kien += kien;
+          break;
+        }
+      }
+
+      // Check tuần
+      for (const b of weekBuckets) {
+        if (t >= b.startMs && t <= b.endMs) {
+          b[chain].donHang += 1;
+          if (isDone) b[chain].kien += kien;
+          break;
+        }
+      }
+
+      // Check tháng
+      for (const b of monthBuckets) {
+        if (t >= b.startMs && t <= b.endMs) {
+          b[chain].donHang += 1;
+          if (isDone) b[chain].kien += kien;
+          break;
+        }
+      }
+    });
+
+    const formatBucket = (list) =>
+      list.map(({ label, CF, CS }) => ({
+        label,
+        CF: { donHang: CF.donHang, kien: CF.kien },
+        CS: { donHang: CS.donHang, kien: CS.kien },
+      }));
+
+    return res.status(200).json({
+      data: {
+        ngay: formatBucket(dayBuckets),
+        tuan: formatBucket(weekBuckets),
+        thang: formatBucket(monthBuckets),
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi getOrderTimeline:", error);
+    return res.status(500).json({ message: "Lỗi server khi lấy timeline", error: error.message });
+  }
+};
+
+
 module.exports = {
   createNhanSuSoan,
   importManyNhanSuSoan,
   getAllNhanSuSoan,
+  getOrderTimeline,
   getNhanSuSoanById,
   updateNhanSuSoan,
   updateManyNhanSuSoan,

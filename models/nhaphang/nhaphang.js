@@ -43,6 +43,10 @@ const nhapHangSchema = new mongoose.Schema({
 //   db.nhaphangs.dropIndex("lpn_1_loai_hinh_1_vi_tri_1_sku_1_kho_1")
 // rồi để mongoose tự tạo lại index mới theo khai báo bên dưới (hoặc chạy
 // syncIndexes() cho model này khi khởi động server).
+// Index phụ trợ giúp tìm kiếm cực nhanh theo LPN và Kho, tránh COLLSCAN gây timeout
+nhapHangSchema.index({ lpn: 1, kho: 1 });
+nhapHangSchema.index({ ngay_import: -1 });
+
 nhapHangSchema.index(
   {
     lpn: 1,

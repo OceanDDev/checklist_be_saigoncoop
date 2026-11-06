@@ -444,6 +444,7 @@ exports.importMany = async (req, res) => {
               so_po: doc.so_po,
               ngay_san_xuat: doc.ngay_san_xuat,
               ngay_het_han: doc.ngay_het_han,
+              loai_hinh: doc.loai_hinh, // Đảm bảo khớp partialFilterExpression { loai_hinh: { $ne: 'Let' } }
             },
             update: {
               $set: { kien, tong_sl, trang_thai, ngay_import },
@@ -454,9 +455,14 @@ exports.importMany = async (req, res) => {
         };
       });
 
-      const bulkResult = await NhapHang.bulkWrite(bulkOps, { ordered: false });
-      upsertedCount += bulkResult.upsertedCount || 0;
-      modifiedCount += bulkResult.modifiedCount || 0;
+      // Chia nhỏ thành các batch (100 items/batch) để tránh timeout và nghẽn socket MongoDB
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < bulkOps.length; i += BATCH_SIZE) {
+        const batch = bulkOps.slice(i, i + BATCH_SIZE);
+        const bulkResult = await NhapHang.bulkWrite(batch, { ordered: false });
+        upsertedCount += bulkResult.upsertedCount || 0;
+        modifiedCount += bulkResult.modifiedCount || 0;
+      }
     }
 
     return res.status(201).json({

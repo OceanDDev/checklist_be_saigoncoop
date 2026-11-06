@@ -47,7 +47,7 @@
       if (!token) return false;
       const sessionExpiry = activeTokens.get(token);
       if (!sessionExpiry) return false;
-      if (Date.now() > sessionExpiry) {
+      if (Date.now() > sessionExpiry) { 
         activeTokens.delete(token);
         return false;
       }

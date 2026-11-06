@@ -11,6 +11,7 @@ const {
   createNhanSuSoan,
   importManyNhanSuSoan,
   getAllNhanSuSoan,
+  getOrderTimeline,
   getNhanSuSoanById,
   updateNhanSuSoan,
   updateManyNhanSuSoan,
@@ -176,6 +177,7 @@ router.delete("/dataCH/:id", verifyToken, dataCHController.deleteDataCH);
 // ===== NHÂN SỰ SOẠN ROUTES =====
 
 router.get("/nhansusoan/top-nang-suat-cong-khai", getTopNangSuatCongKhai);
+router.get("/nhansusoan/timeline", verifyToken, getOrderTimeline);
 router.delete("/nhansusoan/delete-all", verifyToken, deleteAllNhanSuSoan);
 router.post("/nhansusoan/kien-theo-soda",verifyToken, getKienTheoSoSoda);
 router.post("/nhansusoan/import-update", verifyToken, importUpdateNhanSuSoan);

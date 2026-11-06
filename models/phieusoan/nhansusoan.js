@@ -76,4 +76,7 @@ const nhanSuSoanSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Index giúp truy vấn theo thời gian import siêu nhanh (cho dashboard & timeline)
+nhanSuSoanSchema.index({ tgImport: -1 });
+
 module.exports = mongoose.model("nhanSuSoan", nhanSuSoanSchema);
